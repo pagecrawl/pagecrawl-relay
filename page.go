@@ -62,6 +62,11 @@ const settingsPage = `<!doctype html>
   <h1>PageCrawl Relay</h1>
   <p class="sub">Your checks leave from this machine, so pages see your connection instead of ours.</p>
 
+  <div class="card" id="locked" hidden>
+    <b>Cannot show this machine's status</b>
+    <div class="msg bad" id="lockedMsg"></div>
+  </div>
+
   <div class="card" id="setup" hidden>
     <b>Connect this machine</b>
     <p class="sub" style="margin:6px 0 12px">
@@ -121,14 +126,41 @@ const settingsPage = `<!doctype html>
   </p>
 </div>
 <script>
-  const key = new URLSearchParams(location.search).get('k') || '';
-  // Drop the key from the address bar so it does not linger in history or get
-  // copied into a screenshot.
-  if (key) history.replaceState({}, '', location.pathname);
+  // The key arrives in the URL, is dropped from the address bar so it cannot linger
+  // in history or be copied into a screenshot, and is kept for this tab so a reload
+  // still works. Without the tab copy, pressing reload left the page authorised for
+  // nothing: every call answered 403, the cards stayed hidden, and the window looked
+  // simply blank.
+  const stash = {
+    get() {
+      try { return sessionStorage.getItem('relay-key') || ''; } catch (e) { return ''; }
+    },
+    set(v) {
+      try { sessionStorage.setItem('relay-key', v); } catch (e) { /* private window */ }
+    },
+  };
+
+  const fromUrl = new URLSearchParams(location.search).get('k') || '';
+  const key = fromUrl || stash.get();
+
+  if (fromUrl) {
+    stash.set(fromUrl);
+    history.replaceState({}, '', location.pathname);
+  }
 
   const call = (path, opts = {}) =>
     fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Relay-Key': key } })
-      .then(r => r.json());
+      .then(r => {
+        // Distinguish "not allowed to ask" from "asked and got nothing", because the
+        // two need completely different things from the person reading the page.
+        if (r.status === 401 || r.status === 403) {
+          const denied = new Error('unauthorised');
+          denied.unauthorised = true;
+          throw denied;
+        }
+
+        return r.json();
+      });
 
   const $ = id => document.getElementById(id);
 
@@ -172,7 +204,35 @@ const settingsPage = `<!doctype html>
     $('stateMsg').className = 'msg bad';
   }
 
-  const refresh = () => call('/api/state').then(render).catch(() => {});
+  function lockedOut(message) {
+    // Say what happened and what to do. Silently rendering an empty page was the
+    // whole problem: nothing was broken, the page simply had no key.
+    $('locked').hidden = false;
+    $('lockedMsg').textContent = message;
+    $('status').hidden = true;
+    $('activity').hidden = true;
+    $('setup').hidden = true;
+  }
+
+  const refresh = () =>
+    call('/api/state')
+      .then(d => {
+        $('locked').hidden = true;
+        render(d);
+      })
+      .catch(err => {
+        if (err && err.unauthorised) {
+          lockedOut(
+            'This page is no longer authorised, which happens after a reload in a new ' +
+              'window. Open the settings page again from the PageCrawl Relay app or its ' +
+              'menu bar icon. The relay itself keeps running.'
+          );
+
+          return;
+        }
+
+        lockedOut('Cannot reach the relay on this computer. It may have been quit.');
+      });
 
   $('save').onclick = () => {
     const token = $('token').value.trim();
