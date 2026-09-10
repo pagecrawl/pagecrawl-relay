@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,7 +108,7 @@ func TestSettingsPageKeepsItsKeyAcrossAReload(t *testing.T) {
 // A page that cannot read the state has to say so. This is the guard against the
 // silent `.catch(() => {})` that made an unauthorised page look merely empty.
 func TestSettingsPageReportsBeingLockedOut(t *testing.T) {
-	for _, needle := range []string{"lockedMsg", "no longer authorised", "Cannot reach the relay"} {
+	for _, needle := range []string{"lockedMsg", "no longer authorised", "Cannot reach PageCrawl Relay"} {
 		if !strings.Contains(settingsPage, needle) {
 			t.Fatalf("the page must explain a failed state fetch, missing %q", needle)
 		}
@@ -135,5 +137,68 @@ func TestStateEndpointRefusesWithoutTheKey(t *testing.T) {
 	req.Header.Set("X-Relay-Key", "correct-horse")
 	if !srv.authorised(req) {
 		t.Fatal("the real key must be accepted")
+	}
+}
+
+// A page kept open, bookmarked, or reopened from history has to keep working after
+// the app restarts. With an ephemeral port it reached nothing and reported the relay
+// as quit while it was running one port over.
+func TestSettingsPageUsesAStablePort(t *testing.T) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferredUIPort))
+	if err != nil {
+		t.Skipf("port %d busy on this machine, which is the case the fallback covers", preferredUIPort)
+	}
+	_ = ln.Close()
+
+	url, err := startUI(NewState(), &Config{}, func(string) {}, func(bool) {})
+	if err != nil {
+		t.Fatalf("startUI: %v", err)
+	}
+
+	if !strings.Contains(url, fmt.Sprintf("127.0.0.1:%d/", preferredUIPort)) {
+		t.Fatalf("expected the stable port in %q", url)
+	}
+}
+
+// Two copies running at once must not fight over it.
+func TestSettingsPageFallsBackWhenThePortIsTaken(t *testing.T) {
+	blocker, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferredUIPort))
+	if err != nil {
+		t.Skipf("port %d already busy: %v", preferredUIPort, err)
+	}
+	defer blocker.Close()
+
+	url, err := startUI(NewState(), &Config{}, func(string) {}, func(bool) {})
+	if err != nil {
+		t.Fatalf("startUI should fall back to any free port, got %v", err)
+	}
+
+	if strings.Contains(url, fmt.Sprintf(":%d/", preferredUIPort)) {
+		t.Fatalf("expected a different port while %d is held, got %q", preferredUIPort, url)
+	}
+}
+
+// Closing the settings page must not lock the operator out of their own relay.
+//
+// The key is minted per run and lives only in memory, so a fresh visit to the port is
+// refused, correctly. Recording the URL is what makes `-open` able to get back in
+// without restarting the relay and dropping every check in flight.
+func TestTheSettingsURLIsRecordedForReopening(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir) // Linux
+	t.Setenv("HOME", dir)            // macOS looks under HOME/Library
+
+	const url = "http://127.0.0.1:28472/?k=deadbeef"
+
+	rememberUIURL(url)
+
+	if got := storedUIURL(); got != url {
+		t.Fatalf("expected the URL back, got %q", got)
+	}
+
+	forgetUIURL()
+
+	if got := storedUIURL(); got != "" {
+		t.Fatalf("the record must go when the relay stops, got %q", got)
 	}
 }

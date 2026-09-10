@@ -201,10 +201,27 @@ func (s *uiServer) routes() *http.ServeMux {
 	return mux
 }
 
+// The port the settings page normally lives on.
+//
+// A stable port, not an ephemeral one, so a page someone left open, bookmarked or
+// reopened from history still finds the relay after a restart. With a random port
+// every run, reopening that page reached nothing at all and reported the relay as
+// quit while it was in fact running, one port over. The key still changes each run,
+// so a stale page is told to reopen itself rather than being quietly trusted.
+//
+// Loopback only, and chosen from a range no common development server uses.
+const preferredUIPort = 28472
+
 // startUI binds loopback and returns the URL to open. Loopback only: this page can
 // set the enrolment token, so it must never be reachable from the network.
 func startUI(state *State, cfg *Config, onToken func(string), onPause func(bool)) (string, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferredUIPort))
+	if err != nil {
+		// Taken, most likely by a second copy of this program. Any free port still
+		// works; the URL is printed and opened, so nothing depends on guessing it.
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
+
 	if err != nil {
 		return "", err
 	}

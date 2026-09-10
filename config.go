@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,55 @@ func configPath() (string, error) {
 	}
 
 	return filepath.Join(base, "config.json"), nil
+}
+
+// Where the running instance leaves the settings-page URL, key and all.
+//
+// The key is minted per run and lives only in memory, so without this there is no way
+// back into the settings page once its tab is closed: a fresh visit to the port has
+// no key and is refused, which is correct but leaves the operator locked out of their
+// own relay. Written 0600, beside the config, and removed on exit.
+func uiURLPath() (string, error) {
+	path, err := configPath()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(filepath.Dir(path), "settings-url"), nil
+}
+
+// rememberUIURL records where the settings page is, for `-open` to find later.
+func rememberUIURL(url string) {
+	path, err := uiURLPath()
+	if err != nil {
+		return
+	}
+
+	// Best effort: not being able to write this costs the convenience of -open, and
+	// nothing else. It must never stop the relay starting.
+	_ = os.WriteFile(path, []byte(url), 0o600)
+}
+
+// forgetUIURL drops the record on the way out, so -open never points at a dead port.
+func forgetUIURL() {
+	if path, err := uiURLPath(); err == nil {
+		_ = os.Remove(path)
+	}
+}
+
+// storedUIURL reads back what a running instance left.
+func storedUIURL() string {
+	path, err := uiURLPath()
+	if err != nil {
+		return ""
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(data))
 }
 
 func loadStored() stored {

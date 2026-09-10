@@ -46,7 +46,21 @@ That is the whole setup. The page shows whether it is connected, how much data i
 has carried, and which site it most recently fetched. Closing the page leaves the
 relay running; quitting the app stops it.
 
-On macOS you also get a menu-bar icon showing status, uptime and data used.
+**Reopening the settings page.** Closing the page leaves the relay running, and the
+page is protected by a key minted fresh each run, so simply visiting the address again
+is refused. To get back in:
+
+```bash
+pagecrawl-relay -open
+```
+
+That finds the relay already running on this computer and opens its page. If you would
+rather not use a terminal, quitting and starting the app again also opens it.
+
+**About the menu bar.** The published binaries have no menu-bar icon. It needs CGO and
+a Mac to build on, which would cost the plain binary its one-machine cross-compile to
+every platform, so it is a separate build (`go build -tags tray`). The settings page is
+the interface for the published builds.
 
 **Where your token is kept:** your user config folder
 (`~/Library/Application Support/pagecrawl-relay/config.json` on macOS,

@@ -79,11 +79,29 @@ func main() {
 		headless = flag.Bool("headless", false, "Never open a settings page: for servers, containers and services")
 		check    = flag.Bool("check", false, "Run a self-check and exit")
 		version  = flag.Bool("version", false, "Print the version and exit")
+		open     = flag.Bool("open", false, "Open the settings page of the relay already running on this computer")
 	)
 	flag.Parse()
 
 	if *version {
 		fmt.Printf("pagecrawl-relay %s (%s)\n", Version, platformName())
+		return
+	}
+
+	// Reopen the settings page of an instance already running here. The settings page
+	// is protected by a key minted per run, so a bare visit to the port is refused;
+	// this is the supported way back in without restarting the relay.
+	if *open {
+		url := storedUIURL()
+		if url == "" {
+			fmt.Println("No relay is running on this computer, or it was started with -headless.")
+			fmt.Println("Start it with: pagecrawl-relay")
+			os.Exit(1)
+		}
+
+		fmt.Printf("Settings: %s\n", url)
+		openBrowser(url)
+
 		return
 	}
 
@@ -117,6 +135,12 @@ func main() {
 			log.Printf("Could not open the settings page (%v). Carrying on without it.", err)
 		} else {
 			settingsURL = url
+			// So the page can be reopened later. The key is minted per run and lives
+			// only in memory, so without this, closing that tab locks the operator
+			// out of their own relay until they restart it.
+			rememberUIURL(url)
+			defer forgetUIURL()
+
 			fmt.Printf("PageCrawl Relay is running.\nSettings: %s\n", url)
 
 			// Open the browser only when there is nothing to relay yet. Someone

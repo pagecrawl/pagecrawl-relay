@@ -231,7 +231,11 @@ const settingsPage = `<!doctype html>
           return;
         }
 
-        lockedOut('Cannot reach the relay on this computer. It may have been quit.');
+        lockedOut(
+          'Cannot reach PageCrawl Relay on this computer. Either it has been quit, ' +
+            'or this page is from an older run and points at a port it no longer uses. ' +
+            'Open the settings page again from the app or its menu bar icon.'
+        );
       });
 
   $('save').onclick = () => {
