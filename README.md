@@ -57,6 +57,41 @@ PageCrawl's own proxies while it is away and pick your machine up again when it
 returns. If you want your connection used reliably, run it on something that stays
 awake, which is what the next two sections are for.
 
+### macOS says it cannot check the app for malware
+
+It will, until the builds are signed with an Apple Developer ID. The binaries are not
+signed yet, and macOS quarantines anything downloaded through a browser from a
+developer it cannot verify. Nothing is wrong with the file: the warning is about who
+vouches for it, not what it contains.
+
+Downloading with `curl` avoids it entirely, because the quarantine flag is set by the
+browser rather than by macOS itself:
+
+```bash
+curl -fsSL -o pagecrawl-relay \
+  https://github.com/pagecrawl/pagecrawl-relay/releases/latest/download/pagecrawl-relay-darwin-arm64
+chmod +x pagecrawl-relay
+./pagecrawl-relay
+```
+
+Use `pagecrawl-relay-darwin-amd64` on an Intel Mac.
+
+If you already downloaded it in a browser, clear the flag on that file:
+
+```bash
+xattr -d com.apple.quarantine ~/Downloads/pagecrawl-relay-darwin-arm64
+chmod +x ~/Downloads/pagecrawl-relay-darwin-arm64
+```
+
+Or build it yourself, which produces the same program and no warning at all:
+
+```bash
+go install github.com/pagecrawl/pagecrawl-relay@latest
+```
+
+Windows SmartScreen shows an equivalent warning ("Windows protected your PC"), for the
+same reason: choose **More info** then **Run anyway**, or build from source.
+
 ---
 
 ## 2. Run it as a service
