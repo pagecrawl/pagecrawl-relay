@@ -1,0 +1,7 @@
+# Build output. The binary is named after the module by `go build ./...`, and the
+# menu-bar and cross-compiled variants land in dist/.
+dist/
+relay-client
+pagecrawl-relay
+pagecrawl-relay-menubar
+built

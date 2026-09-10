@@ -1,0 +1,50 @@
+# PageCrawl Relay, as a systemd service.
+#
+#   sudo cp pagecrawl-relay /usr/local/bin/
+#   sudo cp pagecrawl-relay.service /etc/systemd/system/
+#   sudo systemctl edit pagecrawl-relay      # add your token, see below
+#   sudo systemctl enable --now pagecrawl-relay
+#
+# The override should contain:
+#   [Service]
+#   Environment=PAGECRAWL_RELAY_TOKEN=your-token-here
+#
+# Using an override rather than this file keeps the token out of any copy of the
+# unit you might share, and out of git.
+#
+# Check it:  pagecrawl-relay -check
+# Watch it:  journalctl -u pagecrawl-relay -f
+
+[Unit]
+Description=PageCrawl Relay
+Documentation=https://pagecrawl.io/help
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/pagecrawl-relay -headless
+Restart=always
+RestartSec=10
+
+# A relay is expected to lose its connection (sleep, a router reboot, an ISP
+# blip) and reconnect on its own, so a restart loop is normal operation rather
+# than a fault to rate-limit aggressively.
+StartLimitIntervalSec=0
+
+# Runs as a system-managed user with no home and no privileges: it only needs to
+# make outbound connections.
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

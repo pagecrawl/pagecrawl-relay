@@ -1,0 +1,30 @@
+# PageCrawl Relay. Put your token in a .env file beside this one:
+#
+#   PAGECRAWL_RELAY_TOKEN=your-token-here
+#
+# then: docker compose up -d
+#
+# Check it: docker compose exec relay pagecrawl-relay -check
+services:
+  relay:
+    build: .
+    # Or, once binaries are published, swap the build for:
+    # image: ghcr.io/pagecrawl/relay:latest
+    container_name: pagecrawl-relay
+    restart: unless-stopped
+    environment:
+      PAGECRAWL_RELAY_TOKEN: ${PAGECRAWL_RELAY_TOKEN:?set PAGECRAWL_RELAY_TOKEN in .env}
+      # Only needed for a self-hosted PageCrawl.
+      # PAGECRAWL_RELAY_GATEWAY: wss://relay.pagecrawl.io/tunnel
+    # No ports. The client dials out; nothing connects to it.
+    #
+    # The relay reaches sites on YOUR network's behalf, so it does not need, and
+    # should not have, more access than a browser would.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
