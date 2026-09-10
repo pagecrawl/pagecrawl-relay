@@ -89,6 +89,25 @@ Or build it yourself, which produces the same program and no warning at all:
 go install github.com/pagecrawl/pagecrawl-relay@latest
 ```
 
+### Checking that a download is the real thing
+
+Every release is built by GitHub Actions from the tagged commit, and each binary
+carries a signed provenance attestation. You can verify that the file you have was
+built by that workflow from this source, rather than uploaded by hand:
+
+```bash
+gh attestation verify pagecrawl-relay-darwin-arm64 --repo pagecrawl/pagecrawl-relay
+```
+
+Every release also ships `SHA256SUMS`:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing
+```
+
+This is a stronger statement than a code signature, which only says that some identity
+paid for a certificate. It says which source code produced this exact file.
+
 Windows SmartScreen shows an equivalent warning ("Windows protected your PC"), for the
 same reason: choose **More info** then **Run anyway**, or build from source.
 
