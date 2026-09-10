@@ -23,14 +23,47 @@ Security reporting is in [SECURITY.md](SECURITY.md).
 
 | You have | Go to |
 |---|---|
+| A Mac or Linux machine, and you are happy with one command | [Homebrew](#install-with-homebrew) |
 | A Mac or Windows PC, and you have never used a terminal | [1. Just run it](#1-just-run-it) |
 | A Linux box or home server you want it running on permanently | [2. Run it as a service](#2-run-it-as-a-service) |
 | Docker, a NAS, or a homelab | [3. Docker](#3-docker) |
-| Home Assistant | [the add-on](../hass-relay-addon/) |
+| Home Assistant | [the add-on](https://github.com/pagecrawl/hass-relay-addon) |
 | A question about whether it is actually working | [4. Check it](#4-check-it) |
 
 First, in PageCrawl: **Settings → Relays → Add machine**. Copy the token it shows.
 It is shown once.
+
+---
+
+## Install with Homebrew
+
+The shortest route on macOS and Linux, and the one that keeps working:
+
+```bash
+brew install pagecrawl/tap/pagecrawl-relay
+pagecrawl-relay
+```
+
+That opens a settings page in your browser; paste the token and press **Connect**.
+
+To update later:
+
+```bash
+brew upgrade pagecrawl-relay
+```
+
+For a machine that should relay whenever it is awake:
+
+```bash
+brew services start pagecrawl-relay
+```
+
+**Worth knowing:** the binaries are not code-signed yet, so a browser download is
+quarantined and macOS refuses to open it. Homebrew fetches with curl, which sets no
+quarantine flag, so this route has no warning to click through and gives you a real
+update path. If you would rather not use Homebrew, the sections below cover every
+other way, and [macOS says it cannot check the app for malware](#macos-says-it-cannot-check-the-app-for-malware)
+explains how to get past the warning.
 
 ---
 
@@ -77,6 +110,11 @@ It will, until the builds are signed with an Apple Developer ID. The binaries ar
 signed yet, and macOS quarantines anything downloaded through a browser from a
 developer it cannot verify. Nothing is wrong with the file: the warning is about who
 vouches for it, not what it contains.
+
+The simplest way past it is not to meet it at all:
+`brew install pagecrawl/tap/pagecrawl-relay`. Homebrew downloads with curl, so the
+file is never quarantined. If you would rather not use Homebrew, either of the
+following works.
 
 Downloading with `curl` avoids it entirely, because the quarantine flag is set by the
 browser rather than by macOS itself:
@@ -130,6 +168,14 @@ same reason: choose **More info** then **Run anyway**, or build from source.
 ## 2. Run it as a service
 
 For a Linux box, a home server, or a Mac mini in a cupboard.
+
+If you installed with Homebrew, this is already done for you and needs no unit file:
+
+```bash
+brew services start pagecrawl-relay
+```
+
+Otherwise, with systemd:
 
 ```bash
 # Download the binary for your platform, then:
