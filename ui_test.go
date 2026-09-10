@@ -202,3 +202,35 @@ func TestTheSettingsURLIsRecordedForReopening(t *testing.T) {
 		t.Fatalf("the record must go when the relay stops, got %q", got)
 	}
 }
+
+// The page must be allowed to call its own API.
+//
+// This is the bug that made the settings page useless from the day it was written:
+// "default-src 'none'" blocks fetch() even back to the page's own origin, so every
+// call was refused by the browser before it left, and the page rendered with every
+// card hidden and a dash in every value. It looked precisely like a relay that was
+// not running, which sent two rounds of debugging after the wrong cause.
+//
+// curl cannot catch this, because curl does not enforce CSP. Nor can a test that only
+// greps the HTML. The header is what matters, so the header is what is asserted.
+func TestTheSettingsPageMayCallItsOwnAPI(t *testing.T) {
+	srv := &uiServer{key: "k", state: NewState(), cfg: &Config{}}
+
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	csp := rec.Header().Get("Content-Security-Policy")
+
+	if csp == "" {
+		t.Fatal("the settings page must still carry a Content-Security-Policy")
+	}
+
+	if !strings.Contains(csp, "connect-src 'self'") {
+		t.Fatalf("CSP must allow same-origin fetch, or the page cannot read its own state: %q", csp)
+	}
+
+	// The rest of the policy is the point of having one: no remote anything.
+	if !strings.Contains(csp, "default-src 'none'") {
+		t.Fatalf("the page must still deny everything it does not need: %q", csp)
+	}
+}

@@ -88,7 +88,14 @@ func (s *uiServer) routes() *http.ServeMux {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// No external requests: the page must work on a machine with no internet,
 		// which is exactly the machine someone is trying to diagnose.
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+		// connect-src 'self' is load-bearing, not decoration: default-src 'none'
+		// blocks fetch() even back to the page's own origin, so without it the page
+		// cannot read /api/state and renders with every card hidden and a dash in
+		// every value. It looks exactly like a relay that is not running.
+		w.Header().Set(
+			"Content-Security-Policy",
+			"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+		)
 		fmt.Fprint(w, settingsPage)
 	})
 
