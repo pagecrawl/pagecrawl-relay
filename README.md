@@ -2,12 +2,13 @@
 
 A small program you run on a computer you own. Your PageCrawl checks then leave
 from **your** connection instead of ours, which is what you want for pages only
-your network can reach: an intranet, a portal that allows your office IP, or a
-site that only serves your country.
+your public IP can reach: a public portal that allows your office IP, or a
+site that only serves your country. Private intranets and LAN addresses are refused.
 
-It is not a general-purpose proxy. It opens no port for anything else, it carries
-only your own team's monitors, and it never sees page content (the encryption is
-between PageCrawl and the site; this only moves the bytes).
+It is not a general-purpose proxy. The gateway authorizes checks for your team,
+and the client independently validates each destination. HTTPS page content stays
+encrypted between PageCrawl and the site. Plain HTTP content is unencrypted and
+visible to the relay machine; hostnames and ports are visible for both.
 
 **Available on every plan, including Free.** Some sites answer a datacenter address
 with a 403, a CAPTCHA, or a stripped-down page, while serving a normal one to an
@@ -58,12 +59,10 @@ For a machine that should relay whenever it is awake:
 brew services start pagecrawl-relay
 ```
 
-**Worth knowing:** the binaries are not code-signed yet, so a browser download is
-quarantined and macOS refuses to open it. Homebrew fetches with curl, which sets no
-quarantine flag, so this route has no warning to click through and gives you a real
-update path. If you would rather not use Homebrew, the sections below cover every
-other way, and [macOS says it cannot check the app for malware](#macos-says-it-cannot-check-the-app-for-malware)
-explains how to get past the warning.
+**Note:** the binaries are not code-signed yet, so macOS may warn when opening a
+browser download. Homebrew provides a convenient install and update path. See
+[macOS says it cannot check the app for malware](#macos-says-it-cannot-check-the-app-for-malware)
+for other installation options and download verification.
 
 ---
 
@@ -75,49 +74,59 @@ No terminal needed.
 2. A settings page opens in your browser.
 3. Paste the token and press **Connect**.
 
-That is the whole setup. The page shows whether it is connected, how much data it
-has carried, and which site it most recently fetched. Closing the page leaves the
-relay running; quitting the app stops it.
+Closing the page leaves the relay running; quitting the app stops it.
 
-**Reopening the settings page.** Closing the page leaves the relay running, and the
-page is protected by a key minted fresh each run, so simply visiting the address again
-is refused. To get back in:
+### Settings page
+
+The local settings page uses PageCrawl's logo and brand styles, adapts to small
+screens, and follows your system's light or dark appearance. Its logo, styles and
+scripts are bundled with the client, so the page loads without internet access.
+Relaying and network diagnostics still need a connection.
+
+| Control or section | What it does |
+|---|---|
+| Connection status | Shows connection time, uptime, data carried and the most recent destination connected to. Counters reset when the app restarts. |
+| Pause / Resume | Stops active connections without forgetting the token. The paused state survives a restart. |
+| Run a check | Checks connectivity and authentication without interrupting the running tunnel. |
+| Recent activity | Shows the last 40 successful destinations and policy refusals. This list stays in memory and resets on restart. |
+| Disconnect this machine | Closes connections and forgets the saved token. Remove the machine in PageCrawl separately to delete its listing. |
+
+**Reopening the settings page.** The page keeps its access key in the current tab,
+so reloading works. To open a new tab or return after restarting the relay:
 
 ```bash
 pagecrawl-relay -open
 ```
 
-That finds the relay already running on this computer and opens its page. If you would
-rather not use a terminal, quitting and starting the app again also opens it.
+That opens the page for the relay already running under your user account. The app
+opens it automatically on first setup; later starts run without opening a browser.
+The page listens only on this computer. Opening its bare address in a fresh tab
+does not grant access to its status or controls.
 
 **About the menu bar.** The published binaries have no menu-bar icon. It needs CGO and
 a Mac to build on, which would cost the plain binary its one-machine cross-compile to
 every platform, so it is a separate build (`go build -tags tray`). The settings page is
 the interface for the published builds.
 
-**Where your token is kept:** your user config folder
-(`~/Library/Application Support/pagecrawl-relay/config.json` on macOS,
-`%AppData%\pagecrawl-relay\` on Windows), readable only by you.
+**Where your token is kept:** `config.json` in your user config folder:
+`~/Library/Application Support/pagecrawl-relay/` on macOS,
+`~/.config/pagecrawl-relay/` on Linux (or `$XDG_CONFIG_HOME/pagecrawl-relay/`), or
+`%AppData%\pagecrawl-relay\` on Windows. On Unix the file is written with mode
+`0600`; Windows uses the access permissions of your user profile.
 
-**A machine that sleeps stops relaying.** That is fine: checks fall back to
-PageCrawl's own proxies while it is away and pick your machine up again when it
-returns. If you want your connection used reliably, run it on something that stays
-awake, which is what the next two sections are for.
+**A machine that sleeps stops relaying.** With fallback enabled, checks can use
+PageCrawl's proxies while it is away. Retry and error policies keep content checks
+on the selected relay and defer them until it returns; the error policy also
+reports the offline failure. For reliable availability, use a machine that stays awake.
 
 ### macOS says it cannot check the app for malware
 
-It will, until the builds are signed with an Apple Developer ID. The binaries are not
-signed yet, and macOS quarantines anything downloaded through a browser from a
-developer it cannot verify. Nothing is wrong with the file: the warning is about who
-vouches for it, not what it contains.
+The binaries are not signed with an Apple Developer ID, so macOS may block a
+download it cannot verify. [Verify the download](#checking-that-a-download-is-the-real-thing)
+before choosing to run it.
 
-The simplest way past it is not to meet it at all:
-`brew install pagecrawl/tap/pagecrawl-relay`. Homebrew downloads with curl, so the
-file is never quarantined. If you would rather not use Homebrew, either of the
-following works.
-
-Downloading with `curl` avoids it entirely, because the quarantine flag is set by the
-browser rather than by macOS itself:
+You can install through Homebrew as shown above, or download from the public
+release with `curl`:
 
 ```bash
 curl -fsSL -o pagecrawl-relay \
@@ -128,14 +137,14 @@ chmod +x pagecrawl-relay
 
 Use `pagecrawl-relay-darwin-amd64` on an Intel Mac.
 
-If you already downloaded it in a browser, clear the flag on that file:
+If you already downloaded and verified it, clear the quarantine flag on that file:
 
 ```bash
 xattr -d com.apple.quarantine ~/Downloads/pagecrawl-relay-darwin-arm64
 chmod +x ~/Downloads/pagecrawl-relay-darwin-arm64
 ```
 
-Or build it yourself, which produces the same program and no warning at all:
+Or build it yourself with Go:
 
 ```bash
 go install github.com/pagecrawl/pagecrawl-relay@latest
@@ -157,11 +166,11 @@ Every release also ships `SHA256SUMS`:
 shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
 
-This is a stronger statement than a code signature, which only says that some identity
-paid for a certificate. It says which source code produced this exact file.
+The attestation identifies the source and build workflow. It serves a different
+purpose from platform code signing and does not replace reviewing the source.
 
-Windows SmartScreen shows an equivalent warning ("Windows protected your PC"), for the
-same reason: choose **More info** then **Run anyway**, or build from source.
+Windows SmartScreen may also warn ("Windows protected your PC"). After verifying
+the download, choose **More info** then **Run anyway**, or build from source.
 
 ---
 
@@ -190,15 +199,19 @@ sudo systemctl edit pagecrawl-relay
 sudo systemctl enable --now pagecrawl-relay
 ```
 
-Check it, then watch it:
+Check the service, then watch its logs:
 
 ```bash
-pagecrawl-relay -check
+sudo systemctl status pagecrawl-relay
 journalctl -u pagecrawl-relay -f
 ```
 
-The bundled unit runs under `DynamicUser` with no home directory, no privileges
-and no filesystem write access. It only needs to make outbound connections.
+For a self-check, set `PAGECRAWL_RELAY_TOKEN` in your shell and run
+`pagecrawl-relay -check`. Your shell does not inherit the token from the systemd
+override. This diagnostic does not interrupt the running service.
+
+The bundled unit uses an unprivileged `DynamicUser`, restricted filesystem access
+and a private temporary directory. It only needs to make outbound connections.
 
 **Not systemd?** The binary is one file with no dependencies. Anything that keeps a
 process alive works: launchd, runit, supervisor, even a `screen` session. It needs
@@ -208,17 +221,20 @@ one environment variable, `PAGECRAWL_RELAY_TOKEN`, and the `-headless` flag.
 
 ## 3. Docker
 
+From this directory, Compose builds the bundled Dockerfile:
+
 ```bash
 echo "PAGECRAWL_RELAY_TOKEN=your-token-here" > .env
 docker compose up -d
 ```
 
-Or without compose:
+Or build and run the image without Compose:
 
 ```bash
+docker build -t pagecrawl-relay .
 docker run -d --name pagecrawl-relay --restart unless-stopped \
   -e PAGECRAWL_RELAY_TOKEN=your-token-here \
-  ghcr.io/pagecrawl/relay:latest
+  pagecrawl-relay
 ```
 
 **No ports are published, and none should be.** The client dials out; nothing ever
@@ -232,13 +248,13 @@ docker compose exec relay pagecrawl-relay -check
 docker inspect --format '{{.State.Health.Status}}' pagecrawl-relay
 ```
 
-**On a NAS** (Synology, unRAID, TrueNAS): add the image through the usual container
-UI, set `PAGECRAWL_RELAY_TOKEN` as an environment variable, set restart to always,
-and publish no ports. That is the entire configuration.
+**On a NAS** (Synology, unRAID, TrueNAS): build the image on the NAS or use its
+Compose support, set `PAGECRAWL_RELAY_TOKEN`, enable automatic restart and publish
+no ports.
 
 **On Home Assistant** there is a proper add-on, so none of the above is needed:
 add the repository, paste the token into the Configuration tab, start it. See
-[`packages/hass-relay-addon`](../hass-relay-addon/). Home Assistant boxes are
+[the Home Assistant add-on](https://github.com/pagecrawl/hass-relay-addon). Home Assistant boxes are
 usually on all the time and sitting on a home connection, which makes them the best
 relay host most people already own.
 
@@ -255,7 +271,8 @@ pagecrawl-relay -check
 It reports, in order: whether a token is configured, whether the gateway name
 resolves, whether this machine can make outbound connections, whether the gateway
 **accepts this machine**, whether the local-network protection is active, and the
-public address monitored sites will see.
+public address monitored sites will see. Authentication uses a diagnostic
+connection that does not replace the running tunnel or interrupt its checks.
 
 Anything that fails says what to do about it. The desktop app runs the same checks
 behind **Run a check** on the settings page.
@@ -267,9 +284,10 @@ address instead of ours.
 
 ### When it is not relaying
 
-Everything below falls back to PageCrawl's own proxies rather than failing the
-check, so the symptom is "the check worked but used the wrong address" rather than
-an error:
+With the default fallback policy, an unavailable relay can cause a check to use
+PageCrawl's proxies. Retry and error policies defer content checks until a relay is
+available; the error policy also marks the check as failed. Review that setting
+when the source IP must stay on your relay:
 
 | Symptom | Cause |
 |---|---|
@@ -288,10 +306,10 @@ pages, which is the expensive part and stays on PageCrawl's side.
 
 | Resource | What to expect |
 |---|---|
-| Memory | About 15 MB idle. Each check in flight adds tens of kilobytes of buffer, so it stays well under 40 MB even when busy. |
+| Memory | Depends on traffic and runtime overhead. The client allows 64 active or closing streams, caps destination queues at 4 MiB per stream and 8 MiB in aggregate, and caps the gateway write queue at 8 MiB. |
 | CPU | Idle between checks, and a fraction of one core while carrying them. Measured at 0% idle. |
 | Disk | About 10 MB for the program. It stores no page content and keeps no database. |
-| Ports | One outbound connection to the gateway. In desktop mode it also listens on loopback for the settings page, and on nothing else. |
+| Ports | One persistent outbound gateway tunnel, plus outbound connections to destination sites. Desktop mode also listens on loopback for the settings page. |
 
 That is comfortable on a Raspberry Pi, a NAS, a Home Assistant box or an old laptop.
 The hardware is not the constraint; the connection is.
@@ -311,8 +329,10 @@ an image-heavy retail page 5 MB or more):
 | 5 | ~14 GB/month | ~2.4 GB/month | ~600 MB/month |
 | 20 | ~58 GB/month | ~10 GB/month | ~2.4 GB/month |
 
-The arithmetic is `monitors x checks per month x page size x 2`. The settings page shows
-what this machine has actually carried, which beats any estimate.
+The arithmetic is `monitors x checks per month x page size x 2`. The settings page's
+**Data carried** counter counts forwarded bytes once and resets when the app
+restarts. Your internet connection carries both network legs, so its total usage
+is roughly twice that counter, plus protocol overhead.
 
 ### What the same traffic would cost as paid bandwidth
 
@@ -338,10 +358,11 @@ Watch the upload side in particular. Home connections often have a tenth of the
 download speed on upload, and a page that takes seconds to fetch can take longer to
 hand back.
 
-Two things keep it in hand: set a monthly limit per machine in PageCrawl under
-**Settings → Relays** (once reached, checks go back to PageCrawl's proxies on their
-own rather than failing), and relay only the monitors that need it. A page that
-works fine from PageCrawl's own addresses gains nothing from being relayed.
+Set a monthly limit per machine under **Settings → Relays**, and relay only the
+monitors that need it. When a machine reaches its limit, checks follow the chosen
+offline policy: fallback permits PageCrawl's proxies, while retry and error keep
+content checks on the relay. A page that works from PageCrawl's own addresses may
+not need relaying.
 
 ---
 
@@ -352,8 +373,9 @@ works fine from PageCrawl's own addresses gains nothing from being relayed.
 | `-token` | `PAGECRAWL_RELAY_TOKEN` | the token from Settings → Relays |
 | `-gateway` | `PAGECRAWL_RELAY_GATEWAY` | gateway URL, only for a self-hosted PageCrawl |
 | `-headless` | | never open a settings page: services and containers |
+| `-open` | | reopen the settings page of a running desktop relay |
 | `-check` | | run the self-check and exit |
-| `-verbose` | | log every destination, including ones that did not resolve |
+| `-verbose` | | also log ordinary destination resolution failures |
 | `-version` | | print the version |
 
 Precedence is flag, then environment variable, then the saved config file, so a
@@ -362,6 +384,11 @@ service's environment is never overridden by a stale desktop config.
 ---
 
 ## Build
+
+Run these commands from the root of this repository. Releases use Go 1.27.1.
+The settings page and its branding
+are embedded from `settings.html`; rebuild the client after editing that file.
+No separate frontend build is needed.
 
 ```bash
 go build -ldflags "-X main.Version=$(git describe --tags --always)" -o pagecrawl-relay .
@@ -381,8 +408,45 @@ The macOS menu-bar build needs CGO and a Mac to build on:
 go build -tags tray -o pagecrawl-relay-menubar .
 ```
 
-Tests: `go test ./...` covers the destination guard, the frame codec and the
-keepalive timings.
+### Tests
+
+From the directory containing this README:
+
+```bash
+go test -race ./...
+go vet ./...
+```
+
+Tests cover destination guards, frame decoding, diagnostic authentication, config
+precedence and permissions, settings authorization, pause and token changes,
+socket cleanup, and bounded queues. They use local test servers without a live
+PageCrawl account.
+
+On Linux, also exercise 32-bit decoding:
+
+```bash
+CGO_ENABLED=0 GOARCH=386 go test ./...
+```
+
+For the optional browser regression, install Node.js with npm, then install the
+test dependency and its Chromium browser in this checkout:
+
+```bash
+npm install --no-save --package-lock=false playwright
+npx playwright install chromium
+node --test settings.browser.test.cjs
+```
+
+This builds and starts the real client, then checks setup, reload authorization,
+pause, disconnect, diagnostic escaping and error recovery under the page's
+Content Security Policy.
+
+The release workflow runs race tests, vet, 32-bit tests and a dependency
+vulnerability scan. Run the scan locally with:
+
+```bash
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+```
 
 ---
 
@@ -390,8 +454,8 @@ keepalive timings.
 
 You are being asked to run a program on your own network that makes outbound
 connections on someone else's behalf. That is a lot to take on trust, so the code
-is MIT licensed and this is the whole of it: about 900 lines, no dependencies
-beyond a websocket library, readable in an afternoon.
+is MIT licensed. The default build uses Go's standard library and a websocket
+library; the optional tray build adds a GUI dependency.
 
 **If you only read one file, read `guard.go`.** It is what decides whether a
 destination may be reached, and it is the difference between a relay and a hole in
@@ -400,8 +464,8 @@ your firewall.
 Four ways to check the claims below rather than believing them:
 
 ```bash
-# 1. What it is doing right now, destination by destination.
-pagecrawl-relay -verbose
+# 1. Open the running desktop relay's status and recent destinations.
+pagecrawl-relay -open
 
 # 2. What it listens on. Only a loopback settings port; nothing on your network.
 lsof -nP -iTCP -sTCP:LISTEN -a -p "$(pgrep -f pagecrawl-relay)"
@@ -409,14 +473,13 @@ lsof -nP -iTCP -sTCP:LISTEN -a -p "$(pgrep -f pagecrawl-relay)"
 # 3. That the guard is on, and that your own network is refused.
 pagecrawl-relay -check
 
-# 4. That the published binary is the code you just read.
-go build -trimpath -ldflags "-s -w -X main.Version=$(cat VERSION)" -o built .
-shasum -a 256 built pagecrawl-relay-darwin-arm64
+# 4. Verify the downloaded binary's source and build workflow.
+gh attestation verify pagecrawl-relay-darwin-arm64 --repo pagecrawl/pagecrawl-relay
 ```
 
-The last one is the important one: builds are reproducible (`-trimpath`, pinned Go
-version, no CGO in the default binary), so a checksum you compute matches the one
-published with the release. If it does not, do not run it and please tell us.
+A checksum comparison requires the same source commit, Go toolchain, target and
+build flags as the release. Use the release workflow and provenance attestation
+to establish those inputs; a different local build can have a different checksum.
 
 ### What is open, what is not, and why
 
@@ -427,51 +490,27 @@ published with the release. If it does not, do not run it and please tell us.
 - the wire format it speaks, which is documented in `protocol.go`;
 - the Docker, systemd and Home Assistant packaging.
 
-**Not open, because it is ours rather than yours:**
+The hosted gateway and PageCrawl service are separate from this public client.
 
-- the gateway that terminates the tunnel on PageCrawl's side;
-- how PageCrawl decides a page needs a different route, schedules checks, scores
-  changes, and everything else the product does.
+The client independently enforces its destination and resource limits. It still
+trusts the gateway to request the intended public sites and enforce team access.
+The activity list shows requested destinations, including policy refusals.
 
-The line is not about secrecy for its own sake. It is this: **everything that runs
-on your computer or touches your network is open.** Nothing in the closed half can
-change what this program will or will not do on your machine, which is why reading
-this repository is enough to judge it. The closed half holds no secret of yours, and
-you can watch everything it asks your machine to do in the activity list.
+## How traffic and destination checks work
 
-## How it works, and why it cannot see into your network
+1. The client opens an outbound authenticated websocket to the gateway. Desktop
+   mode also serves a settings page on loopback. No router port forwarding is needed.
+2. The gateway asks it to connect to a destination for a monitor. The client
+   resolves the name, filters refused addresses, and dials an approved IP directly.
+3. Bytes flow between the gateway and destination. HTTPS encrypts page content
+   between PageCrawl and the site; plain HTTP does not. The relay sees the
+   destination hostname and port in either case.
+4. Finishing, pausing or disconnecting closes sockets and cancels pending work.
 
-**The short version.** PageCrawl's server opens the page as usual. The only thing
-that changes is which door the traffic goes out of: instead of leaving from a data
-centre, it leaves from your machine. Your computer passes bytes along without being
-able to read them, the way a postal sorting office moves a sealed envelope.
-
-**The longer version**, because "trust us" is not an answer:
-
-1. Your machine makes one outgoing connection to PageCrawl and holds it open. It
-   never accepts an incoming one. There is nothing to forward on your router, and
-   nothing on the internet can reach it.
-2. When one of **your** monitors is due, PageCrawl asks your machine to open a
-   connection to that site, and only that site.
-3. Your machine checks the address is a real public one, not something on your own
-   network, and then connects.
-4. Encrypted bytes flow back and forth. The encryption is between PageCrawl and the
-   site, so your machine cannot read the page even though it carried it. Neither can
-   anyone watching your network.
-5. When the check finishes, the permission that allowed it stops working.
-
-**Why it cannot browse your network.** Your machine never decides where to connect;
-PageCrawl asks, and every request is checked against a refusal list before anything
-happens. Your router, your NAS, your printer, anything on `192.168.x` or `10.x`, and
-the addresses cloud servers use for their own configuration are all refused. The
-check happens after the address is looked up and before the connection is made, so a
-web address that secretly points at your router is refused too. You can watch this
-happen live: refusals appear in the settings page's activity list, and
-`-check` proves the guard is switched on.
-
-**Why it cannot be used against you by us.** The permission PageCrawl issues is for
-one check, on one monitor, belonging to your team. It cannot be reused for another
-customer, and it stops working when the check ends.
+The guard blocks private and special address ranges, including common cloud
+metadata addresses and IPv6 translation prefixes. It does not infer what service
+a public address runs. Network-specific routing of public addresses remains an
+operator consideration. See [SECURITY.md](SECURITY.md) for exact boundaries.
 
 ## Can PageCrawl tell whether I modified this?
 
@@ -483,26 +522,9 @@ depended on a check that cannot hold. So we assume every client is modified and
 enforce the rules that matter on our side instead: which team a machine may carry
 work for, how much data it may use, and what it may be asked to reach.
 
-If you remove the guard from your own copy, the machine may reach your own network
-on our instruction. That is your decision about your own network, and it gains you
-nothing against anyone else: the destinations still come from PageCrawl, and
-PageCrawl only ever issues destinations for your team's monitors.
-[SECURITY.md](SECURITY.md) sets out where each rule is enforced and why.
-
-## How it protects the machine it runs on
-
-The reason you can run this at home without handing PageCrawl a route into your
-network:
-
-- **It refuses your own network.** Every destination is resolved first, then
-  checked, and the connection is made to the exact address that was checked, which
-  closes DNS rebinding. Loopback, RFC1918, CGNAT, link-local (including cloud
-  metadata) and non-web ports are all refused. `-check` proves this is on.
-- **It only carries your monitors.** Each connection is authorised by a credential
-  minted for one check and bound to your machine, that monitor and your team.
-- **It dials out.** Nothing connects to it, so there is no port to expose.
-- **It cannot read anything.** TLS runs between PageCrawl and the site; this moves
-  encrypted bytes.
+Removing the local guard weakens protection for that machine. Gateway checks
+remain responsible for cross-team authorization and usage limits, regardless
+of which client binary is running. [SECURITY.md](SECURITY.md) describes both sides.
 
 ## Layout
 
@@ -510,12 +532,15 @@ network:
 |---|---|
 | `main.go` | flags, modes, the reconnect loop |
 | `config.go` | flag/env/file precedence, saved token |
+| `client.go` | synchronized settings, session cancellation |
 | `tunnel.go` | websocket to the gateway, stream multiplexing |
 | `protocol.go` | the wire format spoken with the gateway |
 | `guard.go` | destination validation, the part that protects the operator |
 | `doctor.go` | the self-check behind `-check` |
-| `ui.go`, `page.go` | the local settings page |
+| `ui.go` | authenticated local settings API |
+| `page.go`, `settings.html` | embedded settings page, bundled logo and styles |
 | `state.go` | live status shared by the page and the menu bar |
+| `*_test.go`, `settings.browser.test.cjs` | Go regressions and the optional Chromium test |
 
 The gateway speaks the same frame format, and both sides have codec tests covering
 partial frames and binary payloads.

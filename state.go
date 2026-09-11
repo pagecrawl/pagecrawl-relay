@@ -6,10 +6,7 @@ import (
 	"time"
 )
 
-// Live state, shared between the connection loop and whatever is displaying it
-// (the menu bar, the local settings page, the terminal). One small mutex-guarded
-// struct rather than channels: every reader wants a snapshot of everything, and
-// readers come and go.
+// State shares locked snapshots with the terminal, tray and settings page.
 type State struct {
 	mu sync.Mutex
 
@@ -26,10 +23,7 @@ type State struct {
 	lastErr  string
 	lastHost string
 
-	// A short ring of recent destinations. This is the answer to "what is it
-	// actually doing on my network", which is the question anyone running this on
-	// their own hardware is entitled to ask. Bounded, and never persisted: it is a
-	// window on the present, not a log to be mined later.
+	// Recent destinations are bounded, kept in memory, and never persisted.
 	recent []Event
 }
 
@@ -42,8 +36,7 @@ type Event struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// recentLimit is deliberately small: a page load touches dozens of hosts, so a
-// longer ring would be noise rather than insight, and it all lives in memory.
+// A page load can touch dozens of hosts; keep the display short.
 const recentLimit = 40
 
 func NewState() *State {
@@ -87,10 +80,7 @@ func (s *State) NoteDestination(host string, port int) {
 	s.mu.Unlock()
 }
 
-// NoteRefused records a destination this machine declined to reach, with why.
-//
-// Refusals matter more than successes here: they are the guard doing its job, and
-// seeing them is what makes the promise checkable rather than something to believe.
+// NoteRefused records policy refusals so the operator can inspect the guard.
 func (s *State) NoteRefused(host string, port int, reason string) {
 	s.mu.Lock()
 	s.push(Event{At: time.Now().Format("15:04:05"), Host: host, Port: port, Allowed: false, Reason: reason})

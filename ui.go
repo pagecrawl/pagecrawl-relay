@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -9,39 +10,24 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
-// A tiny settings page served on loopback, so someone who has never opened a
-// terminal can paste a token, see that it is working, and turn it off again.
-//
-// Why a local web page rather than a native window: it needs no GUI toolkit, so
-// the binary stays pure Go and cross-compiles to every platform from one machine.
-// The menu-bar build just opens this page.
+// The loopback settings page keeps the default binary independent of GUI toolkits.
 
 // uiServer owns the loopback listener and the key that protects it.
 type uiServer struct {
-	state   *State
-	cfg     *Config
+	client  *relayClient
 	key     string
 	addr    string
-	onToken func(string)
-	onPause func(bool)
+	checkMu sync.Mutex
 }
 
-// A page in someone's browser can POST to 127.0.0.1 just as easily as this app can:
-// that is ordinary CSRF, and the target here is the enrolment token. Two defences,
-// because either alone has gaps:
-//
-//   - a random key minted per run, handed to the browser in the URL we open and
-//     required on every mutating request, which a third-party page cannot guess; and
-//   - an Origin check, which blocks a page that somehow learned the key from
-//     replaying it cross-origin.
+// Require the per-run key and reject foreign Origins. Loopback alone does not
+// prevent another page in the operator's browser from calling this API.
 func (s *uiServer) authorised(r *http.Request) bool {
-	// Exact match, never a prefix. A prefix test on a host token accepts anything
-	// that merely STARTS with it, so "http://localhost" would also match
-	// "http://localhost.evil.com", and "http://127.0.0.1:54321" would match
-	// "http://127.0.0.1:54321.evil.com" - both domains an attacker can register.
+	// Compare whole origins, never prefixes such as localhost.evil.com.
 	if origin := r.Header.Get("Origin"); origin != "" && !s.originAllowed(origin) {
 		return false
 	}
@@ -54,27 +40,22 @@ func (s *uiServer) authorised(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(supplied), []byte(s.key)) == 1
 }
 
-// originAllowed accepts only the two origins this page is ever served from: the
-// listen address itself, and the same port under the "localhost" name a browser may
-// substitute for 127.0.0.1.
+// Origins must match exactly, including their port and scheme.
 func (s *uiServer) originAllowed(origin string) bool {
 	_, port, err := net.SplitHostPort(s.addr)
-	if err != nil {
-		// Cannot determine the port, so cannot authorise anything on host grounds.
-		return false
-	}
+	return err == nil && (origin == "http://"+s.addr ||
+		origin == "http://localhost:"+port || origin == "http://[::1]:"+port)
+}
 
-	for _, allowed := range []string{
-		"http://" + s.addr,
-		"http://localhost:" + port,
-		"http://[::1]:" + port,
-	} {
-		if origin == allowed {
-			return true
+func (s *uiServer) api(method string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != method || !s.authorised(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
+		handler(w, r)
 	}
-
-	return false
 }
 
 func (s *uiServer) routes() *http.ServeMux {
@@ -86,12 +67,9 @@ func (s *uiServer) routes() *http.ServeMux {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// No external requests: the page must work on a machine with no internet,
-		// which is exactly the machine someone is trying to diagnose.
-		// connect-src 'self' is load-bearing, not decoration: default-src 'none'
-		// blocks fetch() even back to the page's own origin, so without it the page
-		// cannot read /api/state and renders with every card hidden and a dash in
-		// every value. It looks exactly like a relay that is not running.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		// The page needs same-origin fetches, but no external assets or requests.
 		w.Header().Set(
 			"Content-Security-Policy",
 			"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
@@ -99,28 +77,18 @@ func (s *uiServer) routes() *http.ServeMux {
 		fmt.Fprint(w, settingsPage)
 	})
 
-	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorised(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		snap := s.state.Snapshot()
-		snap.ExitIP = firstNonEmpty(snap.ExitIP, "")
+	mux.HandleFunc("/api/state", s.api(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+		cfg := s.client.config()
 		writeJSON(w, map[string]any{
-			"state":      snap,
-			"configured": s.cfg.Token != "",
-			"gateway":    s.cfg.GatewayURL,
+			"state":      s.client.state.Snapshot(),
+			"configured": cfg.Token != "",
+			"gateway":    cfg.GatewayURL,
 			"version":    Version,
 			"platform":   platformName(),
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/token", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !s.authorised(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-
+	mux.HandleFunc("/api/token", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Token string `json:"token"`
 		}
@@ -128,100 +96,54 @@ func (s *uiServer) routes() *http.ServeMux {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-
 		token := strings.TrimSpace(body.Token)
 		if len(token) < 32 {
 			writeJSON(w, map[string]any{"ok": false, "error": "That does not look like a relay token. Copy the whole value shown when you added the machine."})
 			return
 		}
+		s.saveToken(w, token)
+	}))
 
-		saved := loadStored()
-		saved.Token = token
-		if err := saveStored(saved); err != nil {
+	mux.HandleFunc("/api/forget", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		s.saveToken(w, "")
+	}))
+
+	mux.HandleFunc("/api/pause", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		paused, err := s.client.togglePause()
+		if err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": "Could not save: " + err.Error()})
 			return
 		}
-
-		s.cfg.Token = token
-		if s.onToken != nil {
-			s.onToken(token)
-		}
-
-		writeJSON(w, map[string]any{"ok": true})
-	})
-
-	mux.HandleFunc("/api/pause", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !s.authorised(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-
-		paused := !s.state.Paused()
-		s.state.SetPaused(paused)
-
-		saved := loadStored()
-		saved.Paused = paused
-		_ = saveStored(saved)
-
-		if s.onPause != nil {
-			s.onPause(paused)
-		}
-
 		writeJSON(w, map[string]any{"ok": true, "paused": paused})
-	})
+	}))
 
-	// Forgetting the token is the "get me out of this" control. It must exist on the
-	// page, because someone who wants to stop relaying should not have to find a
-	// config file to do it.
-	mux.HandleFunc("/api/forget", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !s.authorised(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+	mux.HandleFunc("/api/check", s.api(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkMu.TryLock() {
+			http.Error(w, "a self-check is already running", http.StatusTooManyRequests)
 			return
 		}
-
-		saved := loadStored()
-		saved.Token = ""
-		if err := saveStored(saved); err != nil {
-			writeJSON(w, map[string]any{"ok": false, "error": "Could not clear it: " + err.Error()})
-			return
-		}
-
-		s.cfg.Token = ""
-
-		// Nudge the connection loop so the tunnel drops now rather than at the next
-		// reconnect: "disconnect" should mean disconnected.
-		if s.onToken != nil {
-			s.onToken("")
-		}
-
-		writeJSON(w, map[string]any{"ok": true})
-	})
-
-	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorised(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		writeJSON(w, map[string]any{"checks": runDoctor(*s.cfg, s.cfg.Token != "")})
-	})
+		defer s.checkMu.Unlock()
+		writeJSON(w, map[string]any{"checks": runDoctorContext(r.Context(), s.client.config())})
+	}))
 
 	return mux
 }
 
-// The port the settings page normally lives on.
-//
-// A stable port, not an ephemeral one, so a page someone left open, bookmarked or
-// reopened from history still finds the relay after a restart. With a random port
-// every run, reopening that page reached nothing at all and reported the relay as
-// quit while it was in fact running, one port over. The key still changes each run,
-// so a stale page is told to reopen itself rather than being quietly trusted.
-//
-// Loopback only, and chosen from a range no common development server uses.
+func (s *uiServer) saveToken(w http.ResponseWriter, token string) {
+	if err := s.client.setToken(token); err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "Could not save: " + err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// A stable port makes reopened pages discoverable. The key still changes on
+// each run, and an occupied port falls back to a free loopback port.
 const preferredUIPort = 28472
 
 // startUI binds loopback and returns the URL to open. Loopback only: this page can
 // set the enrolment token, so it must never be reachable from the network.
-func startUI(state *State, cfg *Config, onToken func(string), onPause func(bool)) (string, error) {
+func startUI(ctx context.Context, client *relayClient) (string, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferredUIPort))
 	if err != nil {
 		// Taken, most likely by a second copy of this program. Any free port still
@@ -233,21 +155,26 @@ func startUI(state *State, cfg *Config, onToken func(string), onPause func(bool)
 		return "", err
 	}
 
-	srv := &uiServer{
-		state:   state,
-		cfg:     cfg,
-		key:     randomKey(),
-		addr:    ln.Addr().String(),
-		onToken: onToken,
-		onPause: onPause,
+	key, err := randomKey()
+	if err != nil {
+		_ = ln.Close()
+		return "", fmt.Errorf("generate settings key: %w", err)
 	}
+	srv := &uiServer{client: client, key: key, addr: ln.Addr().String()}
 
 	server := &http.Server{
 		Handler:           srv.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
-	go func() { _ = server.Serve(ln) }()
+	go func() {
+		stop := context.AfterFunc(ctx, func() { _ = server.Close() })
+		defer stop()
+		_ = server.Serve(ln)
+	}()
 
 	return fmt.Sprintf("http://%s/?k=%s", srv.addr, srv.key), nil
 }

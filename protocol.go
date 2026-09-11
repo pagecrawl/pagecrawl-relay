@@ -58,16 +58,15 @@ func decodeFrame(buf []byte) (frame, int, error) {
 		return frame{}, 0, errShortFrame
 	}
 
-	length := int(binary.BigEndian.Uint32(buf[5:9]))
+	length := binary.BigEndian.Uint32(buf[5:9])
 
-	// Checked BEFORE the length is used to size anything, so an absurd header can
-	// never cause an allocation. The caller treats this as fatal and drops the
-	// tunnel rather than trying to resynchronise a stream it cannot parse.
+	// Check the unsigned length before allocation or conversion to int, which
+	// would overflow on 32-bit clients. An oversized header closes the tunnel.
 	if length > maxFrameBytes {
 		return frame{}, 0, errOversized
 	}
 
-	total := headerBytes + length
+	total := headerBytes + int(length)
 
 	if len(buf) < total {
 		return frame{}, 0, errShortFrame

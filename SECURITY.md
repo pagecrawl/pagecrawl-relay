@@ -27,8 +27,8 @@ Ranked by how much we want to hear about it:
 
 1. **Anything that lets one customer's check use another customer's relay**, or
    otherwise crosses the team boundary.
-2. **Anything that lets the relay reach the operator's own network** — their
-   router, their NAS, cloud metadata — through a name, an address encoding, or a
+2. **Anything that lets the relay reach the operator's own network**, their
+   router, their NAS, cloud metadata, through a name, an address encoding, or a
    redirect the guard does not catch.
 3. **Anything that turns the gateway into an open proxy**, or lets an enrolled
    machine take the gateway down.
@@ -45,38 +45,74 @@ client is unmodified, because that is not possible for software someone else run
 and pretending otherwise would be worse than useless: it would put the security of
 other customers behind a check that cannot hold.
 
-Everything that must be true is therefore enforced on our side:
+The gateway must enforce cross-team authorization, usage limits, frame sizes and
+resource limits without trusting the client's reports. The client independently
+limits destinations, frames, pending dials, streams and queued bytes.
 
-| Rule | Where it is enforced | Why not the client |
-|---|---|---|
-| A relay only carries its own team's checks | Gateway, per connection, against a credential minted for one check | A patched client could claim anything |
-| Monthly data limits | Gateway counts the bytes it moves | A client could under-report |
-| Which sites a check may reach | Only the gateway sends destinations; the client cannot choose targets | A client that picks its own targets would be a proxy for its operator, not a relay |
-| Frame and stream limits | Gateway | A client can send whatever it likes |
+The client trusts the gateway to request the intended checks. It receives a
+destination hostname and port, not a separately verifiable proof of team or
+monitor ownership. A compromised gateway could request arbitrary permitted public
+destinations or consume bandwidth within the client's limits. The local guard
+reduces access to private networks; it is not a complete boundary against every
+possible routing configuration.
 
-**What a modified client can do is hurt itself.** Removing the local guard means
-that machine may reach its own network on our instruction, which is a decision its
-operator has made about their own network. It gains nothing against anyone else:
-the destination still comes from the gateway, and the gateway only issues
-destinations for that team's monitors.
+## Content and credentials
 
-**What a modified client cannot do:** use another team's relay, obtain other
-customers' traffic, use the tunnel to carry its own traffic, exceed its data limit,
-or exhaust the gateway.
+HTTPS content remains encrypted between the PageCrawl worker and destination.
+Plain HTTP content is unencrypted and visible to the relay host and destination
+network. The gateway connection uses WSS by default, which protects that hop.
+Hostnames, ports and traffic sizes are visible to the relay even for HTTPS.
+
+Per-check proxy authorization is cached for 20 seconds by default, bounded by
+credential expiry. A check finishing or being revoked can therefore remain
+accepted briefly from cache. Existing streams have a separate expiry and maximum
+five-minute lifetime. Local pause and forget close sockets directly.
+
+The enrolment token is a bearer credential. It travels in the Authorization
+header, not a query parameter. Desktop configuration and the per-run settings URL
+are stored in the user's config directory with mode 0600 on Unix. The settings
+page binds loopback and checks its random key plus any supplied Origin.
 
 ## The guard, specifically
 
-`guard.go` is the file worth reading. The design point that matters: the
-destination is resolved **first**, the resolved address is checked, and the
-connection is then made to that exact address. There is no second lookup between
-the check and the connection, which is what closes DNS rebinding.
+`guard.go` resolves each destination and filters refused addresses before dialing
+an approved IP directly. There is no second DNS lookup between validation and
+connection. A name returning both public and private addresses can use only its
+approved public addresses.
 
-Refused: loopback, RFC1918, CGNAT (100.64/10), link-local including cloud metadata
-(169.254.169.254), unique-local and link-local IPv6, IPv4-mapped IPv6, 6to4,
-`.local` / `.internal` / `.lan` / `.home`, ambiguous numeric address forms (octal,
-hex, dword), and non-web ports.
+Refused address ranges include loopback, RFC1918, CGNAT (100.64/10), unspecified,
+multicast, reserved IPv4, link-local (including 169.254.169.254), private IPv6, and
+the Azure platform address 168.63.129.16. The complete 6to4 (2002::/16), Teredo
+(2001::/32), well-known NAT64 (64:ff9b::/96) and local-use NAT64 (64:ff9b:1::/48)
+prefixes are refused. IPv4-mapped IPv6 is checked as its embedded IPv4 address.
+Locally configured translation prefixes and public addresses routed to private
+services are outside what an address list can reliably identify.
 
-The gateway enforces the same list independently, so both would have to be wrong.
+Names `localhost` and suffixes `.local`, `.internal`, `.localdomain`, `.lan` and
+`.home` are refused before resolution. Other names and numeric spellings must
+resolve to an approved address.
+
+The port denylist is **22, 23, 25, 135, 137, 138, 139, 445, 3389, 5432, 6379,
+11211 and 27017**. Other ports from 1 to 65535 are permitted. This is a denylist
+of selected services, not an HTTP-only port policy.
+
+The gateway also validates destinations. Its hostname check does not resolve
+using the relay's network, so the client's post-resolution check remains essential.
+
+## Resource and lifecycle limits
+
+The client permits 64 stream slots, including pending opens and streams whose
+workers are still closing. Destination queues are limited to 4 MiB per stream
+and 8 MiB in aggregate; the gateway write queue is limited to 8 MiB. Both directions
+also have message-count limits. Writes have 10-second deadlines. A destination
+queue overflow closes that stream, and gateway queue overflow closes the tunnel.
+Each websocket message and protocol payload is limited to roughly 8 MiB. These
+limits bound protocol buffers, not total Go runtime memory or bandwidth.
+
+Pause, forget and token replacement cancel pending DNS/dials and close active
+sockets before returning success. Self-check authentication uses a diagnostic
+connection that does not register a tunnel or mark the relay online. A successful
+websocket upgrade is insufficient: the gateway must acknowledge authentication.
 
 ## Scope
 

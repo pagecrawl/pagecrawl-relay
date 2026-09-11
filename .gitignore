@@ -5,3 +5,8 @@ relay-client
 pagecrawl-relay
 pagecrawl-relay-menubar
 built
+
+# Local credentials and optional browser-test dependencies.
+.env
+.pagecrawl-relay/
+node_modules/

@@ -1,0 +1,9 @@
+.git
+.env
+.pagecrawl-relay
+node_modules
+dist
+relay-client
+pagecrawl-relay
+pagecrawl-relay-menubar
+built

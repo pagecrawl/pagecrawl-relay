@@ -1,17 +1,9 @@
-# Build and publish the release binaries, with proof of where they came from.
-#
-# The binaries are not code-signed (that needs an Apple Developer ID and an
-# Authenticode certificate), so this does the next best thing and the thing that
-# actually matters for an open-source client: it builds them on GitHub's runners from
-# a tagged commit and attaches a signed provenance attestation. Anyone can then check
-# that the file they downloaded was built by this workflow, from this source, rather
-# than uploaded by hand from somebody's laptop:
+# Build release binaries from a tagged commit and attach signed provenance.
+# Verify a downloaded binary with:
 #
 #   gh attestation verify pagecrawl-relay-darwin-arm64 --repo pagecrawl/pagecrawl-relay
 #
-# That is a stronger claim than a code signature, which only says an identity paid for
-# a certificate. It does not stop Gatekeeper or SmartScreen warning, because those ask
-# a different question; see the README.
+# Provenance does not replace platform code signing; see the README.
 name: Release
 
 on:
@@ -41,15 +33,17 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # Follows go.mod, so the build never silently drifts to a different
-          # toolchain than the one the tests ran on.
-          go-version-file: go.mod
+          # Keep release builds, the Docker builder and security checks aligned.
+          # go.mod declares source compatibility, not the release toolchain.
+          go-version: '1.27.1'
           cache: true
 
-      - name: Vet and test
+      - name: Vet, test and scan
         run: |
           go vet ./...
-          go test ./...
+          go test -race ./...
+          CGO_ENABLED=0 GOARCH=386 go test ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
       - name: Build
         env:
@@ -61,8 +55,7 @@ jobs:
           TAG="${{ inputs.tag || github.ref_name }}"
           mkdir -p dist
 
-          # The names are load-bearing: /downloads/relay/{platform} in the PageCrawl
-          # app redirects straight to these, and the docs name them.
+          # Keep asset names stable for existing download links and documentation.
           while read -r goos goarch suffix; do
             GOOS="$goos" GOARCH="$goarch" go build \
               -trimpath \

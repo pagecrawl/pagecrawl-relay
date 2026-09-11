@@ -8,13 +8,12 @@ import (
 // The keepalive constants exist to survive the shortest timeout on the path, so
 // pin the relationships rather than leaving them as three unexplained numbers.
 func TestKeepaliveTimings(t *testing.T) {
-	// Cloudflare fronts relay.pagecrawl.io and reclaims idle websockets at roughly
-	// 100s. Home routers and corporate firewalls are often shorter still, so the
-	// ping has to be well inside that, not merely under it.
-	const cloudflareIdleCutoff = 100 * time.Second
+	// Keep pings well within a 100-second idle timeout to leave room for delays
+	// from gateways, home routers and corporate firewalls.
+	const idleCutoff = 100 * time.Second
 
-	if pingInterval >= cloudflareIdleCutoff/2 {
-		t.Errorf("pingInterval %s leaves no margin under the %s idle cutoff", pingInterval, cloudflareIdleCutoff)
+	if pingInterval >= idleCutoff/2 {
+		t.Errorf("pingInterval %s leaves no margin under the %s idle cutoff", pingInterval, idleCutoff)
 	}
 
 	// One lost pong must not tear down a healthy tunnel.

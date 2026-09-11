@@ -12,7 +12,7 @@
 # Using an override rather than this file keeps the token out of any copy of the
 # unit you might share, and out of git.
 #
-# Check it:  pagecrawl-relay -check
+# Check it:  set PAGECRAWL_RELAY_TOKEN in your shell, then pagecrawl-relay -check
 # Watch it:  journalctl -u pagecrawl-relay -f
 
 [Unit]

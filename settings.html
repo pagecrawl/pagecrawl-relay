@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PageCrawl Relay</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --brand: #2955c3; --accent: #2955c3;
+    --bg: #f0f2f5; --card: #fff; --ink: #262626; --muted: #595959;
+    --line: #d9d9d9; --rule: #f0f0f0; --ok: #237804; --bad: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141414; --card: #1f1f1f; --ink: #f0f0f0; --muted: #bfbfbf;
+      --line: #434343; --rule: #303030; --accent: #91b4ff; --ok: #95de64; --bad: #ff9c94;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .brandbar { background: linear-gradient(57deg, #54457f 0%, #2b59c3 100%); color: #fff; }
+  .brandbar-inner { max-width: 720px; margin: 0 auto; padding: 8px 24px; display: flex; align-items: center; gap: 24px; }
+  .brandbar svg { display: block; width: 132px; height: 60px; flex: none; }
+  .brandbar-name { border-left: 1px solid rgba(255,255,255,.35); padding-left: 24px; font-size: 16px; font-weight: 500; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 24px; }
+  h1 { font-size: 26px; line-height: 1.3; font-weight: 600; margin: 0 0 8px; }
+  h2 { font-size: 16px; line-height: 1.5; font-weight: 600; margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; justify-content: space-between; gap: 20px; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+  .row:last-child { border-bottom: 0; }
+  .row span:first-child { color: var(--muted); flex-shrink: 0; }
+  .row span:last-child { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; text-align: right; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+  .on { background: var(--ok); } .off { background: var(--bad); } .idle { background: var(--muted); }
+  label { display: block; margin-bottom: 6px; font-weight: 500; }
+  input { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px;
+          background: var(--card); color: var(--ink); font: inherit; }
+  input::placeholder { color: var(--muted); }
+  button { min-height: 40px; padding: 8px 16px; border: 1px solid var(--brand); border-radius: 4px;
+           background: var(--brand); color: #fff; font: inherit; font-weight: 500; cursor: pointer; }
+  button.ghost { background: var(--card); color: var(--ink); border-color: var(--line); }
+  button:not(:disabled):hover { filter: brightness(1.1); }
+  button.ghost:not(:disabled):hover { color: var(--accent); border-color: var(--accent); filter: none; }
+  input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .msg { margin-top: 10px; font-size: 13px; overflow-wrap: anywhere; }
+  .msg:empty { margin-top: 0; }
+  .msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+  .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .section-heading .sub { font-size: 12px; margin: 0; }
+  .hint { margin: 6px 0 16px; }
+  .fine-print { font-size: 13px; margin: 10px 0 0; }
+  .activity-description { font-size: 13px; margin: 0 0 8px; }
+  .check { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .check:last-child { border-bottom: 0; }
+  .check b { font-weight: 600; }
+  .check .d { color: var(--muted); font-size: 13px; }
+  .check .fix { color: var(--accent); font-size: 13px; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .ev { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 7px 0;
+        border-bottom: 1px solid var(--rule); font-size: 13px; }
+  .ev:last-child { border-bottom: 0; }
+  .ev time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ev .h { overflow-wrap: anywhere; min-width: 0; }
+  .ev .why { color: var(--bad); }
+  .empty { color: var(--muted); padding: 8px 0; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
+  @media (max-width: 480px) {
+    .brandbar-inner { padding: 8px 16px; }
+    .wrap { padding: 24px 16px; }
+    .card { padding: 16px; }
+    h1 { font-size: 24px; }
+    button { min-height: 44px; }
+  }
+</style>
+</head>
+<body>
+<header class="brandbar">
+  <div class="brandbar-inner">
+    <!-- PageCrawl wordmark, bundled for offline use. -->
+    <svg role="img" aria-label="PageCrawl" xmlns="http://www.w3.org/2000/svg"
+ viewBox="0 0 626.000000 284.000000"
+ preserveAspectRatio="xMidYMid meet">
+
+<g transform="translate(0.000000,284.000000) scale(0.100000,-0.100000)"
+fill="#fff" stroke="none">
+<path d="M3480 2574 c-553 -67 -1049 -128 -1102 -134 -54 -7 -99 -17 -101 -24
+-3 -6 8 -115 24 -241 16 -127 29 -236 29 -242 0 -14 28 -17 47 -5 9 5 5 59
+-14 220 -15 117 -23 215 -19 219 6 6 2049 262 2096 263 13 0 20 -35 39 -192
+31 -257 29 -248 57 -248 20 0 24 5 24 30 0 69 -53 456 -63 466 -9 8 -278 -21
+-1017 -112z"/>
+<path d="M1355 1743 c-134 -41 -214 -162 -203 -311 9 -117 70 -211 167 -256
+37 -17 65 -21 141 -21 82 0 103 4 153 27 l57 27 0 120 0 121 -96 0 -95 0 3
+-32 c3 -32 4 -33 56 -36 l52 -3 0 -60 c0 -60 0 -60 -37 -75 -59 -25 -169 -16
+-220 18 -113 75 -120 281 -13 371 62 52 167 59 249 18 52 -27 65 -26 85 4 16
+24 15 25 -24 54 -69 50 -179 64 -275 34z"/>
+<path d="M2435 1747 c-141 -47 -208 -141 -208 -292 -1 -183 113 -305 284 -305
+59 0 132 24 176 57 38 29 41 43 12 69 -16 15 -23 16 -37 6 -94 -69 -206 -68
+-279 1 -48 45 -66 101 -61 191 3 63 8 81 33 117 41 58 94 84 170 84 44 0 71
+-6 98 -23 49 -28 63 -28 84 4 16 25 16 27 -3 41 -72 54 -190 76 -269 50z"/>
+<path d="M5737 1750 c-85 -22 -146 -73 -185 -157 -59 -127 -24 -303 76 -379
+113 -86 281 -82 389 10 18 15 44 53 60 84 24 49 27 69 28 147 0 83 -3 95 -34
+152 -52 96 -122 140 -234 148 -34 2 -79 0 -100 -5z m151 -85 c83 -35 124 -104
+125 -210 0 -54 -5 -83 -21 -117 -70 -144 -284 -144 -353 1 -30 62 -31 169 -2
+226 51 98 155 139 251 100z"/>
+<path d="M218 1744 c-5 -4 -8 -137 -8 -296 l0 -288 45 0 44 0 3 108 3 107 90
+5 c150 9 215 65 215 184 0 75 -25 124 -81 156 -40 22 -57 25 -174 28 -71 2
+-133 0 -137 -4z m236 -78 c72 -30 90 -119 37 -178 -28 -31 -33 -33 -110 -36
+l-81 -4 0 116 0 116 60 0 c33 0 76 -6 94 -14z"/>
+<path d="M711 1487 c-58 -144 -111 -277 -118 -295 l-14 -33 48 3 47 3 31 77
+30 78 125 0 125 0 30 -78 31 -77 48 -3 c37 -2 47 0 43 10 -2 7 -56 140 -118
+296 l-113 282 -45 0 -46 0 -104 -263z m197 36 c22 -60 43 -116 47 -125 7 -16
+-2 -18 -95 -18 -78 0 -101 3 -97 13 2 6 24 63 48 125 24 61 46 112 50 112 3 0
+24 -48 47 -107z"/>
+<path d="M1780 1455 l0 -295 185 0 185 0 0 35 0 35 -140 0 -140 0 0 95 0 95
+115 0 115 0 0 35 0 35 -115 0 -116 0 3 93 3 92 138 3 137 3 0 34 0 35 -185 0
+-185 0 0 -295z"/>
+<path d="M2828 1744 c-5 -4 -8 -137 -8 -296 l0 -288 45 0 45 0 0 121 0 120 42
+-3 c42 -3 44 -5 128 -120 l85 -118 48 0 c26 0 47 3 47 8 0 4 -40 61 -89 127
+l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
+-137 -4z m224 -74 c47 -13 68 -43 68 -95 0 -72 -48 -105 -151 -105 l-59 0 0
+105 0 105 53 0 c28 0 69 -5 89 -10z"/>
+<path d="M3495 1718 c-7 -18 -60 -151 -118 -295 l-105 -263 43 0 c50 0 51 1
+85 90 l25 65 127 3 126 3 30 -78 29 -78 47 -3 c25 -2 46 -1 46 2 0 3 -52 136
+-116 296 l-116 290 -45 0 c-40 0 -45 -3 -58 -32z m155 -330 c0 -5 -43 -8 -95
+-8 -68 0 -95 3 -95 12 0 7 21 66 46 132 l47 119 48 -124 c27 -68 49 -127 49
+-131z"/>
+<path d="M3800 1738 c0 -7 40 -139 88 -293 l88 -280 41 -3 41 -3 73 220 c41
+122 76 221 79 221 3 0 38 -99 79 -221 l73 -220 41 3 41 3 87 280 c49 154 89
+286 89 293 0 7 -14 12 -39 12 -21 0 -43 -6 -49 -12 -5 -7 -35 -101 -67 -208
+-50 -172 -75 -239 -75 -203 0 6 -32 104 -71 218 l-72 206 -36 -3 -36 -3 -74
+-219 c-41 -121 -77 -213 -80 -205 -2 8 -32 106 -65 219 l-61 205 -48 3 c-34 2
+-47 -1 -47 -10z"/>
+<path d="M4690 1455 l0 -295 170 0 170 0 0 35 0 35 -125 0 -125 0 0 260 0 260
+-45 0 -45 0 0 -295z"/>
+<path d="M5320 1455 l0 -295 45 0 45 0 0 295 0 295 -45 0 -45 0 0 -295z"/>
+<path d="M5112 1248 c-18 -18 -14 -63 6 -81 50 -46 114 13 82 74 -12 22 -68
+27 -88 7z"/>
+<path d="M4758 943 c-12 -3 -15 -12 -12 -36 25 -163 49 -409 40 -412 -29 -10
+-2087 -257 -2099 -252 -9 3 -20 66 -36 203 -12 110 -25 207 -27 217 -3 10 -15
+17 -30 17 -18 0 -24 -5 -24 -22 -1 -59 54 -464 64 -475 9 -9 257 18 1105 122
+601 74 1097 135 1101 135 4 0 10 7 14 15 6 16 -49 469 -59 485 -6 10 -9 11
+-37 3z"/>
+</g>
+</svg>
+    <span class="brandbar-name">Relay</span>
+  </div>
+</header>
+<main class="wrap">
+  <h1>Relay settings</h1>
+  <p class="sub">Your checks leave from this machine, so pages see your connection instead of ours.</p>
+
+  <div class="card" id="locked" hidden>
+    <h2>Cannot show this machine's status</h2>
+    <div class="msg bad" id="lockedMsg"></div>
+  </div>
+
+  <div class="card" id="setup" hidden>
+    <h2>Connect this machine</h2>
+    <p class="sub hint">
+      In PageCrawl, open <b>Settings &rarr; Relays</b>, choose <b>Add machine</b>, and paste the token here.
+    </p>
+    <label for="token">Relay token</label>
+    <input id="token" placeholder="Paste the token" autocomplete="off" spellcheck="false">
+    <div class="actions"><button id="save">Connect</button></div>
+    <div class="msg" id="saveMsg"></div>
+  </div>
+
+  <div class="card" id="status" hidden>
+    <h2>Connection status</h2>
+    <div class="row"><span>Status</span><span id="s-state"></span></div>
+    <div class="row"><span>Connected for</span><span id="s-conn">-</span></div>
+    <div class="row"><span>Running for</span><span id="s-up">-</span></div>
+    <div class="row"><span>Data carried</span><span id="s-traffic">-</span></div>
+    <div class="row"><span>Connections</span><span id="s-conns">-</span></div>
+    <div class="row"><span>Your address</span><span id="s-ip">-</span></div>
+    <div class="row"><span>Most recent site</span><span id="s-host">-</span></div>
+    <div class="actions">
+      <button class="ghost" id="pause">Pause</button>
+      <button class="ghost" id="runCheck">Run a check</button>
+    </div>
+    <div class="msg" id="stateMsg"></div>
+  </div>
+
+  <div class="card" id="activity" hidden>
+    <div class="section-heading">
+      <h2>Recent activity</h2>
+      <span class="sub">newest first, last 40</span>
+    </div>
+    <p class="sub activity-description">
+      Every destination this machine was asked to reach. Refusals are the guard
+      protecting your own network.
+    </p>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="checks" hidden><h2>Self-check</h2><div id="checkList"></div></div>
+
+  <div class="card">
+    <h2>This machine</h2>
+    <div class="row"><span>Gateway</span><span id="s-gw">-</span></div>
+    <div class="row"><span>Version</span><span id="s-ver">-</span></div>
+    <div class="actions">
+      <button class="ghost" id="forget">Disconnect this machine</button>
+    </div>
+    <p class="sub fine-print">
+      Forgets the token stored on this computer and stops relaying. The machine stays
+      listed in PageCrawl until you remove it there.
+    </p>
+    <div class="msg" id="forgetMsg"></div>
+  </div>
+
+  <footer>
+    This window is only a control panel. Closing it leaves the relay running;
+    quit the app to stop it. <span id="ver"></span>
+  </footer>
+</main>
+<script>
+  // The key arrives in the URL, is dropped from the address bar so it cannot linger
+  // in history or be copied into a screenshot, and is kept for this tab so a reload
+  // still works. Without the tab copy, pressing reload left the page authorised for
+  // nothing: every call answered 403, the cards stayed hidden, and the window looked
+  // simply blank.
+  const stash = {
+    get() {
+      try { return sessionStorage.getItem('relay-key') || ''; } catch (e) { return ''; }
+    },
+    set(v) {
+      try { sessionStorage.setItem('relay-key', v); } catch (e) { /* private window */ }
+    },
+  };
+
+  const fromUrl = new URLSearchParams(location.search).get('k') || '';
+  const key = fromUrl || stash.get();
+
+  if (fromUrl) {
+    stash.set(fromUrl);
+    history.replaceState({}, '', location.pathname);
+  }
+
+  const call = (path, opts = {}) =>
+    fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Relay-Key': key } })
+      .then(r => {
+        // Distinguish "not allowed to ask" from "asked and got nothing", because the
+        // two need completely different things from the person reading the page.
+        if (r.status === 401 || r.status === 403) {
+          const denied = new Error('unauthorised');
+          denied.unauthorised = true;
+          throw denied;
+        }
+
+        if (!r.ok) throw new Error('Request failed (' + r.status + ').');
+        return r.json();
+      });
+
+  const $ = id => document.getElementById(id);
+
+  // Hostnames arrive from the network. Never interpolate them as markup.
+  const esc = v => String(v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  function render(d) {
+    const s = d.state;
+    $('setup').hidden = d.configured;
+    $('status').hidden = !d.configured;
+    $('ver').textContent = d.version + ' · ' + d.platform;
+
+    let cls = 'idle', label = 'Paused';
+    if (!s.paused) {
+      cls = s.connected ? 'on' : 'off';
+      label = s.connected ? 'Connected' : 'Not connected';
+    }
+    $('s-state').innerHTML = '<span class="dot ' + cls + '"></span>' + label;
+    $('s-conn').textContent = s.connected_for || '-';
+    $('s-up').textContent = s.uptime;
+    $('s-traffic').textContent = s.traffic;
+    $('s-conns').textContent = s.connections;
+    $('s-ip').textContent = s.exit_ip || 'Run a check to see it';
+    $('s-host').textContent = s.last_host || 'Nothing yet';
+    $('pause').textContent = s.paused ? 'Resume' : 'Pause';
+    $('s-gw').textContent = d.gateway;
+    $('s-ver').textContent = d.version + ' \u00b7 ' + d.platform;
+
+    const rows = s.recent || [];
+    $('activity').hidden = !d.configured;
+    $('log').innerHTML = rows.length
+      ? rows.map(e =>
+          '<div class="ev"><time>' + e.at + '</time>' +
+          '<span class="dot ' + (e.allowed ? 'on' : 'off') + '"></span>' +
+          '<span class="h">' + esc(e.host) + (e.port && e.port !== 443 ? ':' + e.port : '') + '</span>' +
+          (e.reason ? '<span class="why">' + esc(e.reason) + '</span>' : '') + '</div>'
+        ).join('')
+      : '<div class="empty">Nothing yet. Point a monitor at this machine and run a check.</div>';
+    $('stateMsg').textContent = (!s.connected && !s.paused && s.last_error) ? s.last_error : '';
+    $('stateMsg').className = 'msg bad';
+  }
+
+  function lockedOut(message) {
+    // Say what happened and what to do. Silently rendering an empty page was the
+    // whole problem: nothing was broken, the page simply had no key.
+    $('locked').hidden = false;
+    $('lockedMsg').textContent = message;
+    $('status').hidden = true;
+    $('activity').hidden = true;
+    $('setup').hidden = true;
+  }
+
+  const refresh = () =>
+    call('/api/state')
+      .then(d => {
+        $('locked').hidden = true;
+        render(d);
+      })
+      .catch(err => {
+        if (err && err.unauthorised) {
+          lockedOut(
+            'This page is no longer authorised, which happens after a reload in a new ' +
+              'window. Open the settings page again from the PageCrawl Relay app or its ' +
+              'menu bar icon. The relay itself keeps running.'
+          );
+
+          return;
+        }
+
+        lockedOut(
+          'Cannot reach PageCrawl Relay on this computer. Either it has been quit, ' +
+            'or this page is from an older run and points at a port it no longer uses. ' +
+            'Open the settings page again from the app or its menu bar icon.'
+        );
+      });
+
+  async function action(button, message, work) {
+    $(button).disabled = true;
+    try {
+      await work();
+      await refresh();
+    } catch (err) {
+      $(message).textContent = err.unauthorised ? 'This page is no longer authorised. Reopen it with pagecrawl-relay -open.' : err.message;
+      $(message).className = 'msg bad';
+    } finally {
+      $(button).disabled = false;
+    }
+  }
+
+  function result(message, response, success) {
+    if (!response.ok) throw new Error(response.error || 'Could not save the change.');
+    $(message).textContent = success;
+    $(message).className = 'msg ok';
+  }
+
+  $('save').onclick = () => action('save', 'saveMsg', async () => {
+    const token = $('token').value.trim();
+    const response = await call('/api/token', { method: 'POST', body: JSON.stringify({ token }) });
+    result('saveMsg', response, 'Token saved. Connecting...');
+    $('token').value = '';
+  });
+
+  $('pause').onclick = () => action('pause', 'stateMsg', async () => {
+    const response = await call('/api/pause', { method: 'POST' });
+    result('stateMsg', response, response.paused ? 'Paused.' : 'Resuming...');
+  });
+
+  $('forget').onclick = () => {
+    if (!confirm('Stop relaying and forget the token stored on this computer?')) return;
+    return action('forget', 'forgetMsg', async () => {
+      result('forgetMsg', await call('/api/forget', { method: 'POST' }), 'Disconnected. Paste a token to connect again.');
+    });
+  };
+
+  $('runCheck').onclick = () => action('runCheck', 'checkList', async () => {
+    $('checks').hidden = false;
+    $('checkList').className = '';
+    $('checkList').textContent = 'Checking...';
+    const response = await call('/api/check');
+    $('checkList').innerHTML = response.checks.map(c =>
+      '<div class="check"><span class="dot ' + (c.ok ? 'on' : 'off') + '" style="margin-top:6px"></span>' +
+      '<div><b>' + esc(c.name) + '</b><div class="d">' + esc(c.detail) + '</div>' +
+      (c.fix ? '<div class="fix">' + esc(c.fix) + '</div>' : '') + '</div></div>'
+    ).join('');
+  });
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

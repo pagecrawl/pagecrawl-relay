@@ -8,8 +8,6 @@
 services:
   relay:
     build: .
-    # Or, once binaries are published, swap the build for:
-    # image: ghcr.io/pagecrawl/relay:latest
     container_name: pagecrawl-relay
     restart: unless-stopped
     environment:

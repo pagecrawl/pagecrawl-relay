@@ -8,8 +8,10 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
+	"log"
 	"time"
 
 	"fyne.io/systray"
@@ -20,7 +22,8 @@ func hasTray() bool { return true }
 // runTray owns the main thread for the life of the app. systray requires that on
 // macOS, so everything else (the tunnel, the settings page) runs in goroutines
 // started before this.
-func runTray(state *State, settingsURL string, onPause func(bool)) {
+func runTray(ctx context.Context, client *relayClient, settingsURL string) {
+	state := client.state
 	systray.Run(func() {
 		systray.SetTemplateIcon(trayIcon, trayIcon)
 		systray.SetTooltip("PageCrawl Relay")
@@ -58,18 +61,15 @@ func runTray(state *State, settingsURL string, onPause func(bool)) {
 					openBrowser(settingsURL)
 
 				case <-pause.ClickedCh:
-					paused := !state.Paused()
-					state.SetPaused(paused)
-
-					saved := loadStored()
-					saved.Paused = paused
-					_ = saveStored(saved)
-
-					if onPause != nil {
-						onPause(paused)
+					if _, err := client.togglePause(); err != nil {
+						log.Printf("Could not save pause: %v", err)
 					}
 
 					render(state, status, uptime, traffic, exit, pause)
+
+				case <-ctx.Done():
+					systray.Quit()
+					return
 
 				case <-quit.ClickedCh:
 					systray.Quit()

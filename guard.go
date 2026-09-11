@@ -1,34 +1,36 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 )
 
-// errRefused marks a destination the guard deliberately would not reach: a private
-// address, a local name, or a port that is not proxyable.
-//
-// Distinguished from a resolution or dial failure because the two mean opposite
-// things to whoever runs the machine. A refusal is the guard doing its job and is
-// worth seeing; a name that does not resolve is usually their own DNS filtering an
-// ad or tracker domain, which is routine and would otherwise fill the log with
-// lines that look like the guard is over-blocking.
+// A policy refusal is worth showing the operator. Ordinary DNS failures can be
+// routine filtering of ads or trackers and are logged only in verbose mode.
 var errRefused = errors.New("destination refused by policy")
 
 // Refused reports whether err is a policy refusal rather than a lookup failure.
 func Refused(err error) bool { return errors.Is(err, errRefused) }
 
-// blockedPorts are ports a web page never legitimately loads over. Proxying them
-// would turn the relay into a way to reach services on the operator's network.
-//
-// The relay gateway enforces the same list independently. This copy is the one
-// that matters to whoever runs this machine: it is applied here, on their
-// hardware, after resolution and before any connection is made.
+// Selected service ports are denied on this machine, independently of the gateway.
+// This is a denylist, not an HTTP-only port policy.
 var blockedPorts = map[int]bool{
 	22: true, 23: true, 25: true, 135: true, 137: true, 138: true, 139: true,
 	445: true, 3389: true, 5432: true, 6379: true, 11211: true, 27017: true,
+}
+
+// Translation/tunnel prefixes can reach IPv4 networks hidden inside an IPv6
+// address. Refuse the whole prefix, including locally assigned NAT64 addresses.
+var blockedNetworks = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2001::/32"),        // Teredo
+	netip.MustParsePrefix("2002::/16"),        // 6to4
+	netip.MustParsePrefix("168.63.129.16/32"), // Azure platform services
 }
 
 // isPrivateHostname catches the names that never need to leave the machine, before
@@ -55,6 +57,15 @@ func isPrivateHostname(host string) bool {
 func isPrivateIP(ip net.IP) bool {
 	if ip == nil {
 		return true // Unparseable means unknown, and unknown means no.
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	for _, prefix := range blockedNetworks {
+		if prefix.Contains(addr.Unmap()) {
+			return true
+		}
 	}
 
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
@@ -86,6 +97,10 @@ func isPrivateIP(ip net.IP) bool {
 // which is what closes DNS rebinding: the address we validated is the address we
 // connect to, with no second lookup in between.
 func resolveAllowed(host string, port int) ([]net.IP, error) {
+	return resolveAllowedContext(context.Background(), host, port)
+}
+
+func resolveAllowedContext(ctx context.Context, host string, port int) ([]net.IP, error) {
 	if port <= 0 || port > 65535 {
 		return nil, fmt.Errorf("%w: port %d out of range", errRefused, port)
 	}
@@ -106,15 +121,15 @@ func resolveAllowed(host string, port int) ([]net.IP, error) {
 		return []net.IP{literal}, nil
 	}
 
-	resolved, err := net.LookupIP(host)
+	resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %q: %w", host, err)
 	}
 
 	allowed := make([]net.IP, 0, len(resolved))
-	for _, ip := range resolved {
-		if !isPrivateIP(ip) {
-			allowed = append(allowed, ip)
+	for _, addr := range resolved {
+		if !isPrivateIP(addr.IP) {
+			allowed = append(allowed, addr.IP)
 		}
 	}
 

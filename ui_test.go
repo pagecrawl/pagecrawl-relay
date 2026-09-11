@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,10 +16,9 @@ import (
 // worse than none, because it invites trusting it.
 func newTestServer() *uiServer {
 	return &uiServer{
-		state: NewState(),
-		cfg:   &Config{},
-		key:   "test-key-0123456789",
-		addr:  "127.0.0.1:54321",
+		client: newRelayClient(Config{}, NewState()),
+		key:    "test-key-0123456789",
+		addr:   "127.0.0.1:54321",
 	}
 }
 
@@ -122,7 +122,7 @@ func TestSettingsPageReportsBeingLockedOut(t *testing.T) {
 // The page itself is served without a key (it has to be, since the browser follows a
 // plain link), so every endpoint behind it must check.
 func TestStateEndpointRefusesWithoutTheKey(t *testing.T) {
-	srv := &uiServer{key: "correct-horse", state: NewState()}
+	srv := &uiServer{key: "correct-horse", client: newRelayClient(Config{}, NewState())}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	if srv.authorised(req) {
@@ -150,7 +150,9 @@ func TestSettingsPageUsesAStablePort(t *testing.T) {
 	}
 	_ = ln.Close()
 
-	url, err := startUI(NewState(), &Config{}, func(string) {}, func(bool) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	url, err := startUI(ctx, newRelayClient(Config{}, NewState()))
 	if err != nil {
 		t.Fatalf("startUI: %v", err)
 	}
@@ -168,7 +170,9 @@ func TestSettingsPageFallsBackWhenThePortIsTaken(t *testing.T) {
 	}
 	defer blocker.Close()
 
-	url, err := startUI(NewState(), &Config{}, func(string) {}, func(bool) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	url, err := startUI(ctx, newRelayClient(Config{}, NewState()))
 	if err != nil {
 		t.Fatalf("startUI should fall back to any free port, got %v", err)
 	}
@@ -214,7 +218,7 @@ func TestTheSettingsURLIsRecordedForReopening(t *testing.T) {
 // curl cannot catch this, because curl does not enforce CSP. Nor can a test that only
 // greps the HTML. The header is what matters, so the header is what is asserted.
 func TestTheSettingsPageMayCallItsOwnAPI(t *testing.T) {
-	srv := &uiServer{key: "k", state: NewState(), cfg: &Config{}}
+	srv := &uiServer{key: "k", client: newRelayClient(Config{}, NewState())}
 
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))

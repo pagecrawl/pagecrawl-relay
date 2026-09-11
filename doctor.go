@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,12 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Self-check. Someone who cannot tell whether this is working needs one command
-// that says so in plain language, and says what to do when it is not.
-//
-// Every check reports its own outcome rather than stopping at the first failure,
-// because the interesting case is usually "three green then one red" and that last
-// line is the answer.
+// Report each diagnostic outcome so a partial failure remains understandable.
 
 type checkResult struct {
 	Name   string `json:"name"`
@@ -27,11 +23,19 @@ type checkResult struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-func runDoctor(cfg Config, hasToken bool) []checkResult {
+const doctorTimeout = 40 * time.Second
+
+func runDoctor(cfg Config) []checkResult {
+	return runDoctorContext(context.Background(), cfg)
+}
+
+func runDoctorContext(parent context.Context, cfg Config) []checkResult {
+	ctx, cancel := context.WithTimeout(parent, doctorTimeout)
+	defer cancel()
 	var out []checkResult
 
 	// 1. Is there a token at all?
-	if !hasToken {
+	if cfg.Token == "" {
 		return append(out, checkResult{
 			Name:   "Enrolment token",
 			OK:     false,
@@ -41,8 +45,7 @@ func runDoctor(cfg Config, hasToken bool) []checkResult {
 	}
 	out = append(out, checkResult{Name: "Enrolment token", OK: true, Detail: "Configured."})
 
-	// 2. Does the gateway name resolve? Distinguished from "cannot connect" because
-	//    the usual cause is a DNS filter or a captive portal, not a firewall.
+	// Separate DNS errors from outbound connection failures.
 	endpoint, err := url.Parse(cfg.GatewayURL)
 	if err != nil || endpoint.Host == "" {
 		return append(out, checkResult{
@@ -58,7 +61,7 @@ func runDoctor(cfg Config, hasToken bool) []checkResult {
 		port = "443"
 	}
 
-	if addrs, err := net.LookupHost(host); err != nil {
+	if addrs, err := net.DefaultResolver.LookupHost(ctx, host); err != nil {
 		out = append(out, checkResult{
 			Name: "DNS", OK: false,
 			Detail: fmt.Sprintf("Could not resolve %s: %v", host, err),
@@ -68,9 +71,8 @@ func runDoctor(cfg Config, hasToken bool) []checkResult {
 		out = append(out, checkResult{Name: "DNS", OK: true, Detail: fmt.Sprintf("%s resolves (%s)", host, strings.Join(addrs, ", "))})
 	}
 
-	// 3. Can we open a TCP connection out? This is the check that fails on a network
-	//    that blocks outbound 443, which is the single most common corporate case.
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 10*time.Second)
+	// Verify outbound TCP independently of token authentication.
+	conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		out = append(out, checkResult{
 			Name: "Outbound connection", OK: false,
@@ -82,46 +84,13 @@ func runDoctor(cfg Config, hasToken bool) []checkResult {
 		out = append(out, checkResult{Name: "Outbound connection", OK: true, Detail: fmt.Sprintf("Reached %s:%s", host, port)})
 	}
 
-	// 4. The real test: does the gateway accept this token? A bad token closes the
-	//    socket with a specific code rather than failing to connect at all.
-	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
-	headers := http.Header{}
-	headers.Set("Authorization", "Bearer "+cfg.Token)
+	// A probe must acknowledge authentication without replacing the live tunnel.
+	out = append(out, gatewayCheck(ctx, cfg))
 
-	probe := *endpoint
-	q := probe.Query()
-	q.Set("platform", platformName())
-	q.Set("version", Version)
-	probe.RawQuery = q.Encode()
-
-	wsConn, resp, err := dialer.Dial(probe.String(), headers)
-	switch {
-	case err == nil:
-		wsConn.Close()
-		out = append(out, checkResult{Name: "Gateway accepted this machine", OK: true, Detail: "Token valid, tunnel established."})
-	case resp != nil && resp.StatusCode == http.StatusUnauthorized:
-		out = append(out, checkResult{
-			Name: "Gateway accepted this machine", OK: false,
-			Detail: "The gateway rejected the token.",
-			Fix:    "The token may have been revoked, or the machine removed in Settings -> Relays. Enrol it again.",
-		})
-	default:
-		detail := err.Error()
-		if resp != nil {
-			detail = resp.Status
-		}
-		out = append(out, checkResult{
-			Name: "Gateway accepted this machine", OK: false,
-			Detail: "Could not establish the tunnel: " + detail,
-			Fix:    "If the outbound check above passed, this is usually a proxy or TLS-inspecting firewall in the way.",
-		})
-	}
-
-	// 5. The guard that protects this machine's own network. Cheap to verify and the
-	//    thing an operator most deserves proof of.
-	_, loopbackErr := resolveAllowed("127.0.0.1", 443)
-	_, lanErr := resolveAllowed("192.168.1.1", 443)
-	_, publicErr := resolveAllowed("example.com", 443)
+	// These literal addresses exercise the guard without an external DNS lookup.
+	_, loopbackErr := resolveAllowedContext(ctx, "127.0.0.1", 443)
+	_, lanErr := resolveAllowedContext(ctx, "192.168.1.1", 443)
+	_, publicErr := resolveAllowedContext(ctx, "1.1.1.1", 443)
 
 	guardOK := Refused(loopbackErr) && Refused(lanErr) && publicErr == nil
 	out = append(out, checkResult{
@@ -129,17 +98,54 @@ func runDoctor(cfg Config, hasToken bool) []checkResult {
 		Detail: "Requests to your own network are refused; public sites are allowed.",
 	})
 
-	// 6. What the monitored sites will actually see. This is the number people came
-	//    for, so it is worth one outbound request.
-	out = append(out, exitAddressCheck())
+	// One outbound request reports the public exit address.
+	out = append(out, exitAddressCheck(ctx))
 
 	return out
 }
 
+// A websocket upgrade alone does not authenticate the token. Only the explicit
+// diagnostic acknowledgement counts; rejection, early close and timeout fail.
+func gatewayCheck(ctx context.Context, cfg Config) checkResult {
+	result := checkResult{Name: "Gateway accepted this machine"}
+	probeCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
+	defer cancel()
+	conn, err := gatewayConnection(probeCtx, cfg, true)
+	if err == nil {
+		defer conn.Close()
+		stop := context.AfterFunc(probeCtx, func() { _ = conn.Close() })
+		defer stop()
+		conn.SetReadLimit(4096)
+		_ = conn.SetReadDeadline(time.Now().Add(cfg.DialTimeout))
+		var kind int
+		var message []byte
+		kind, message, err = conn.ReadMessage()
+		if err == nil {
+			var ack struct {
+				Authenticated bool `json:"authenticated"`
+			}
+			if kind != websocket.TextMessage || json.Unmarshal(message, &ack) != nil || !ack.Authenticated {
+				err = fmt.Errorf("gateway did not acknowledge authentication")
+			}
+		}
+	}
+	if err == nil {
+		result.OK = true
+		result.Detail = "Token valid. The diagnostic did not replace the running tunnel."
+	} else if isRejected(err) {
+		result.Detail = "The gateway rejected the token."
+		result.Fix = "The token may have been revoked, or the machine removed in Settings -> Relays. Enrol it again."
+	} else {
+		result.Detail = "Could not verify authentication: " + err.Error()
+		result.Fix = "Check the gateway connection and confirm the gateway supports relay diagnostics."
+	}
+	return result
+}
+
 // exitAddressCheck reports the public address this machine egresses from, which is
 // the address monitored pages will see when a check is relayed.
-func exitAddressCheck() checkResult {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func exitAddressCheck(parent context.Context) checkResult {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
@@ -160,8 +166,8 @@ func exitAddressCheck() checkResult {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
 	ip := strings.TrimSpace(string(body))
 
-	if ip == "" {
-		return checkResult{Name: "Exit address", OK: false, Detail: "No address returned."}
+	if resp.StatusCode != http.StatusOK || net.ParseIP(ip) == nil {
+		return checkResult{Name: "Exit address", OK: false, Detail: "The address service did not return a valid IP address."}
 	}
 
 	return checkResult{
@@ -193,7 +199,7 @@ func printDoctor(results []checkResult) int {
 		return 0
 	}
 
-	fmt.Printf("  %d check(s) need attention.\n", failed)
+	fmt.Printf("  Checks needing attention: %d.\n", failed)
 
 	return 1
 }

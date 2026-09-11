@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -32,9 +33,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Websocket close codes the gateway uses to turn a relay away for good. Mirrored
-// from scripts/relay-gateway.js; they are in the private 4000-4999 range, so no
-// library constant covers them.
+// Gateway-specific websocket close codes for a missing or unauthorized token.
+// These use the private 4000-4999 range, so no library constant covers them.
 const (
 	closeMissingToken = 4001
 	closeUnauthorized = 4003
@@ -60,15 +60,13 @@ func platformName() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
 }
 
-func randomKey() string {
+func randomKey() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
-		// Cannot happen in practice, and the settings page is Origin-checked as well,
-		// so a predictable key alone does not open it up.
-		return "fallback-key"
+		return "", err
 	}
 
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }
 
 func main() {
@@ -108,7 +106,7 @@ func main() {
 	cfg, hasToken := resolveConfig(*gateway, *token, *verbose)
 
 	if *check {
-		os.Exit(printDoctor(runDoctor(cfg, hasToken)))
+		os.Exit(printDoctor(runDoctor(cfg)))
 	}
 
 	state := NewState()
@@ -120,17 +118,15 @@ func main() {
 		log.Fatal("No token. Enrol this machine at Settings -> Relays, then set PAGECRAWL_RELAY_TOKEN.")
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
-	// The connection loop watches this, so pasting a token into the settings page
-	// connects immediately rather than waiting out a backoff.
-	restart := make(chan struct{}, 1)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	client := newRelayClient(cfg, state)
+	defer client.stop()
 
 	settingsURL := ""
 
 	if !*headless {
-		url, err := startUI(state, &cfg, func(string) { nudge(restart) }, func(bool) { nudge(restart) })
+		url, err := startUI(ctx, client)
 		if err != nil {
 			log.Printf("Could not open the settings page (%v). Carrying on without it.", err)
 		} else {
@@ -151,108 +147,65 @@ func main() {
 		}
 	}
 
-	go supervise(&cfg, state, restart)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		supervise(ctx, client)
+	}()
 
-	// The menu bar must own the main thread on macOS, so it blocks here instead of
-	// the signal wait. Quitting from the menu returns.
 	if hasTray() && !*headless {
-		go func() {
-			<-stop
-			log.Println("Relay stopped. Your monitors fall back to PageCrawl's own proxies.")
-			os.Exit(0)
-		}()
-
-		runTray(state, settingsURL, func(bool) { nudge(restart) })
-
-		return
+		runTray(ctx, client, settingsURL)
+		cancel()
+	} else {
+		<-ctx.Done()
 	}
-
-	<-stop
-	log.Println("Relay stopped. Your monitors fall back to PageCrawl's own proxies.")
+	client.stop()
+	<-done
+	log.Println("Relay stopped. Monitors follow their configured relay fallback setting.")
 }
 
-func nudge(ch chan struct{}) {
-	select {
-	case ch <- struct{}{}:
-	default:
-	}
-}
-
-// supervise keeps the tunnel up, reconnecting with backoff.
-//
-// A relay lives on a laptop or a home server, so disconnects are normal rather than
-// exceptional: sleep, a dropped VPN, a router reboot. Reconnecting quietly is the
-// whole job.
-func supervise(cfg *Config, state *State, restart chan struct{}) {
+// supervise uses one retry path for failed dials and disconnected sessions.
+func supervise(ctx context.Context, client *relayClient) {
 	backoff := time.Second
-
-	for {
-		if cfg.Token == "" || state.Paused() {
-			// Nothing to do yet. Wait to be told the token or the pause changed,
-			// rather than spinning.
+	for ctx.Err() == nil {
+		session, cfg, paused, changed := client.session(ctx)
+		if cfg.Token == "" || paused {
 			select {
-			case <-restart:
-			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+			case <-changed:
 			}
-
 			continue
 		}
 
-		conn, err := dial(*cfg)
-		if err != nil {
-			state.MarkDisconnected(err)
-			log.Printf("Not connected (%v). Retrying in %s.", err, backoff.Round(time.Second))
-
-			select {
-			case <-restart:
+		conn, err := dialContext(session, cfg)
+		if err == nil && client.attach(session, conn) {
+			conn.state = client.state
+			startedAt := time.Now()
+			log.Printf("Connected to %s as %s.", cfg.GatewayURL, platformName())
+			err = conn.Run()
+			if time.Since(startedAt) > healthySession {
 				backoff = time.Second
-
-				continue
-			case <-time.After(backoff):
 			}
-
-			backoff = growBackoff(backoff, cfg.MaxBackoff)
-
-			continue
 		}
-
-		conn.state = state
-		state.MarkConnected("")
-		log.Printf("Connected to %s as %s. Carrying your own monitors only.", cfg.GatewayURL, platformName())
-
-		startedAt := time.Now()
-		err = conn.Run()
-		state.MarkDisconnected(err)
-		log.Printf("Disconnected (%v). Carried %s this session.", err, humanBytes(conn.Bytes()))
-
-		// A session that stayed up is evidence the setup is sound, so the next
-		// hiccup starts from a short wait again. One that dropped straight away is
-		// not: without this the loop redials with no pause at all, and a gateway
-		// that accepts the handshake and then rejects the token spins here as fast
-		// as it can answer. Measured against a bad token: two full connect and
-		// reject cycles inside one second, forever.
-		if time.Since(startedAt) > healthySession {
-			backoff = time.Second
-		}
-
+		client.state.MarkDisconnected(err)
 		if isRejected(err) {
-			// Retrying sooner cannot help: the token is the problem, and only the
-			// person running this can fix it. Wait the longest interval and say so
-			// in words rather than repeating a close code.
 			backoff = cfg.MaxBackoff
-			log.Printf("The gateway rejected this token. Check it in Settings -> Relays, " +
-				"or remove the machine there and add it again.")
+			log.Print("The gateway rejected this token. Enrol this machine again in Settings -> Relays.")
 		}
-
-		select {
-		case <-restart:
+		if session.Err() != nil {
 			backoff = time.Second
-
 			continue
-		case <-time.After(backoff):
 		}
-
-		backoff = growBackoff(backoff, cfg.MaxBackoff)
+		log.Printf("Not connected (%v). Retrying in %s.", err, backoff.Round(time.Second))
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+		case <-changed:
+			backoff = time.Second
+		case <-timer.C:
+			backoff = growBackoff(backoff, cfg.MaxBackoff)
+		}
+		timer.Stop()
 	}
 }
 

@@ -8,25 +8,16 @@ import (
 	"time"
 )
 
-// Persisted settings, so someone who double-clicks the app once never has to think
-// about a terminal or an environment variable again.
-//
-// Precedence, most specific first: command-line flag, environment variable, this
-// file. A server operator setting PAGECRAWL_RELAY_TOKEN in a systemd unit or a
-// docker-compose file therefore never has their config silently overridden by a
-// stale file, and a desktop user never has to supply anything twice.
+// Settings persist desktop enrolment. Flags override environment variables,
+// which override this file.
 type stored struct {
 	Token      string `json:"token"`
 	GatewayURL string `json:"gateway_url,omitempty"`
 	Paused     bool   `json:"paused,omitempty"`
 }
 
-// configPath returns the per-user config file, creating its directory.
-//
-// os.UserConfigDir is the platform-correct home for this: ~/Library/Application
-// Support on macOS, %AppData% on Windows, ~/.config on Linux. A container with no
-// home falls back to a path under the working directory so a bind-mounted volume
-// still persists it.
+// configPath uses the platform config directory, or a relative directory when
+// no user config directory exists (for example, in a container).
 func configPath() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil || base == "" {
@@ -44,10 +35,8 @@ func configPath() (string, error) {
 
 // Where the running instance leaves the settings-page URL, key and all.
 //
-// The key is minted per run and lives only in memory, so without this there is no way
-// back into the settings page once its tab is closed: a fresh visit to the port has
-// no key and is refused, which is correct but leaves the operator locked out of their
-// own relay. Written 0600, beside the config, and removed on exit.
+// Written 0600 beside the config so -open can reopen the authenticated page.
+// Removed on normal exit; a new run replaces its key.
 func uiURLPath() (string, error) {
 	path, err := configPath()
 	if err != nil {
@@ -66,7 +55,7 @@ func rememberUIURL(url string) {
 
 	// Best effort: not being able to write this costs the convenience of -open, and
 	// nothing else. It must never stop the relay starting.
-	_ = os.WriteFile(path, []byte(url), 0o600)
+	_ = writePrivateFile(path, []byte(url))
 }
 
 // forgetUIURL drops the record on the way out, so -open never points at a dead port.
@@ -122,7 +111,25 @@ func saveStored(s stored) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o600)
+	return writePrivateFile(path, data)
+}
+
+// A new 0600 file also repairs overly broad permissions on an existing file.
+// Rename prevents readers from seeing a partially written credential.
+func writePrivateFile(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".relay-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }
 
 // resolveConfig folds flags, environment and the config file into one Config, and
@@ -130,7 +137,7 @@ func saveStored(s stored) error {
 func resolveConfig(flagGateway, flagToken string, verbose bool) (Config, bool) {
 	saved := loadStored()
 
-	token := firstNonEmpty(flagToken, os.Getenv("PAGECRAWL_RELAY_TOKEN"), saved.Token)
+	token := firstNonEmpty(strings.TrimSpace(flagToken), strings.TrimSpace(os.Getenv("PAGECRAWL_RELAY_TOKEN")), strings.TrimSpace(saved.Token))
 
 	gateway := firstNonEmpty(
 		flagGateway,
