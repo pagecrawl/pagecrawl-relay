@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -52,12 +52,13 @@ jobs:
           notes.write_text(sections[0].strip() + '\n')
           PY
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Keep release builds, the Docker builder and security checks aligned.
           # go.mod declares source compatibility, not the release toolchain.
           go-version: '1.27.1'
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Vet, test and scan
         run: |
@@ -94,7 +95,7 @@ jobs:
           cd dist && sha256sum pagecrawl-relay-* > SHA256SUMS && cat SHA256SUMS
 
       - name: Attest the builds
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: 'dist/pagecrawl-relay-*'
 
