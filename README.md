@@ -17,6 +17,7 @@ PageCrawl, this is the thing to try. It costs nothing beyond your own bandwidth.
 
 Open source and small enough to read: see [Why this is open source](#why-this-is-open-source).
 Security reporting is in [SECURITY.md](SECURITY.md).
+See [the changelog](CHANGELOG.md) for release changes.
 
 ---
 
@@ -447,6 +448,13 @@ vulnerability scan. Run the scan locally with:
 ```bash
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 ```
+
+### Preparing a release
+
+Before tagging, rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to the exact
+tag, such as `## vX.Y.Z`, and commit it with the release changes. The workflow uses
+that section as the release notes and stops if it is missing or empty. Add a new
+Unreleased section for later changes.
 
 ---
 

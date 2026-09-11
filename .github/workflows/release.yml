@@ -31,6 +31,27 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      - name: Read release notes
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ['RELEASE_TAG']
+          changelog = Path('CHANGELOG.md').read_text()
+          sections = re.findall(
+              r'^## ' + re.escape(tag) + r'[ \t]*\n(.*?)(?=^## |\Z)',
+              changelog, re.MULTILINE | re.DOTALL,
+          )
+          if len(sections) != 1 or not sections[0].strip():
+              raise SystemExit(f'Add one nonempty "## {tag}" section to CHANGELOG.md before releasing.')
+          notes = Path(os.environ['RUNNER_TEMP']) / 'relay-release-notes.md'
+          notes.write_text(sections[0].strip() + '\n')
+          PY
+
       - uses: actions/setup-go@v5
         with:
           # Keep release builds, the Docker builder and security checks aligned.
@@ -84,14 +105,15 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.tag || github.ref_name }}"
 
-          # A tag push does not create a release, so make one if it is missing. Doing
-          # it here rather than by hand keeps the assets and the release notes from
-          # ever describing different builds.
-          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "${{ github.repository }}" \
+              --notes-file "${RUNNER_TEMP}/relay-release-notes.md"
+          else
             gh release create "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TAG" \
-              --generate-notes
+              --notes-file "${RUNNER_TEMP}/relay-release-notes.md"
           fi
 
           # --clobber so re-running a build replaces the assets rather than failing
