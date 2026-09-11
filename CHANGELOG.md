@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.5
 
 - Pause, disconnect and token changes now close active connections and cancel
   pending work before reporting success.
