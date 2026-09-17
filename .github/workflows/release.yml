@@ -206,7 +206,12 @@ jobs:
           MOBILE_VERSION="$(cd mobile && go list -m -f '{{.Version}}' golang.org/x/mobile)"
           go install "golang.org/x/mobile/cmd/gomobile@${MOBILE_VERSION}"
           go install "golang.org/x/mobile/cmd/gobind@${MOBILE_VERSION}"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006" >/dev/null
+          # A finite stream of answers rather than `yes`, which is still writing when
+          # sdkmanager exits and dies of a broken pipe; with pipefail that killed the step
+          # even though the NDK had installed.
+          printf 'y\n%.0s' $(seq 1 50) |
+              "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006" >/dev/null
+          test -d "$ANDROID_HOME/ndk/27.1.12297006"
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.1.12297006"
           gomobile init
           mobile/build-aar.sh
