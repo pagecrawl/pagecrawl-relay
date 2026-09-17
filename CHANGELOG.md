@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.6
 
 - **PageCrawl Relay for Android.** A separate app that turns an Android phone into a
   relay, running the same destination guard and protocol as the desktop program. Add it
@@ -15,6 +15,10 @@
 - The status now reports when the gateway rejected the token, separately from an
   ordinary disconnection, so a front end can say the token needs replacing instead of
   retrying indefinitely.
+- **A published Docker image.** Each release now pushes
+  `ghcr.io/pagecrawl/pagecrawl-relay` for amd64 and arm64, with a signed provenance
+  attestation, so a NAS or a homelab box can pull the relay instead of building it.
+  Compose uses it by default; building the bundled Dockerfile still works unchanged.
 
 ## v0.1.5
 
