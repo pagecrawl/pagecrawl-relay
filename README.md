@@ -465,7 +465,7 @@ connections on someone else's behalf. That is a lot to take on trust, so the cod
 is MIT licensed. The default build uses Go's standard library and a websocket
 library; the optional tray build adds a GUI dependency.
 
-**If you only read one file, read `guard.go`.** It is what decides whether a
+**If you only read one file, read `relay/guard.go`.** It is what decides whether a
 destination may be reached, and it is the difference between a relay and a hole in
 your firewall.
 
@@ -495,7 +495,7 @@ to establish those inputs; a different local build can have a different checksum
 
 - this client, in full: the tunnel, the destination guard, the settings page, the
   self-check, and every test;
-- the wire format it speaks, which is documented in `protocol.go`;
+- the wire format it speaks, which is documented in `relay/protocol.go`;
 - the Docker, systemd and Home Assistant packaging.
 
 The hosted gateway and PageCrawl service are separate from this public client.
@@ -536,18 +536,24 @@ of which client binary is running. [SECURITY.md](SECURITY.md) describes both sid
 
 ## Layout
 
+The relay itself is the `relay` package. The desktop program at the root wraps it with
+flags, a settings page, a tray icon and a config file, so another front end can run the
+same guard and the same protocol rather than a copy of them.
+
 | file | role |
 |---|---|
-| `main.go` | flags, modes, the reconnect loop |
+| `relay/guard.go` | destination validation, the part that protects the operator |
+| `relay/protocol.go` | the wire format spoken with the gateway |
+| `relay/tunnel.go` | websocket to the gateway, stream multiplexing |
+| `relay/supervise.go` | the reconnect loop and its backoff |
+| `relay/client.go` | synchronized settings, session cancellation |
+| `relay/config.go` | settings, and the `Store` a front end saves them through |
+| `relay/doctor.go` | the self-checks behind `-check` |
+| `relay/state.go` | live status shared by every front end |
+| `main.go` | flags, modes, the terminal output of `-check` |
 | `config.go` | flag/env/file precedence, saved token |
-| `client.go` | synchronized settings, session cancellation |
-| `tunnel.go` | websocket to the gateway, stream multiplexing |
-| `protocol.go` | the wire format spoken with the gateway |
-| `guard.go` | destination validation, the part that protects the operator |
-| `doctor.go` | the self-check behind `-check` |
 | `ui.go` | authenticated local settings API |
 | `page.go`, `settings.html` | embedded settings page, bundled logo and styles |
-| `state.go` | live status shared by the page and the menu bar |
 | `*_test.go`, `settings.browser.test.cjs` | Go regressions and the optional Chromium test |
 
 The gateway speaks the same frame format, and both sides have codec tests covering

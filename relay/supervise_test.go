@@ -1,4 +1,4 @@
-package main
+package relay
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 func TestRejectedTokenIsRecognised(t *testing.T) {
 	for _, code := range []int{closeMissingToken, closeUnauthorized} {
 		err := error(&websocket.CloseError{Code: code, Text: "Unauthorized"})
-		if !isRejected(err) {
+		if !IsRejected(err) {
 			t.Fatalf("close code %d should be treated as a rejection", code)
 		}
 	}
@@ -30,7 +30,7 @@ func TestOrdinaryDisconnectsAreNotRejections(t *testing.T) {
 	}
 
 	for _, err := range cases {
-		if isRejected(err) {
+		if IsRejected(err) {
 			t.Fatalf("%v should not be treated as a rejection", err)
 		}
 	}

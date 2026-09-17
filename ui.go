@@ -12,13 +12,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pagecrawl/pagecrawl-relay/relay"
 )
 
 // The loopback settings page keeps the default binary independent of GUI toolkits.
 
 // uiServer owns the loopback listener and the key that protects it.
 type uiServer struct {
-	client  *relayClient
+	client  *relay.Client
 	key     string
 	addr    string
 	checkMu sync.Mutex
@@ -78,9 +80,9 @@ func (s *uiServer) routes() *http.ServeMux {
 	})
 
 	mux.HandleFunc("/api/state", s.api(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.client.config()
+		cfg := s.client.Config()
 		writeJSON(w, map[string]any{
-			"state":      s.client.state.Snapshot(),
+			"state":      s.client.State().Snapshot(),
 			"configured": cfg.Token != "",
 			"gateway":    cfg.GatewayURL,
 			"version":    Version,
@@ -109,7 +111,7 @@ func (s *uiServer) routes() *http.ServeMux {
 	}))
 
 	mux.HandleFunc("/api/pause", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
-		paused, err := s.client.togglePause()
+		paused, err := s.client.TogglePause()
 		if err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": "Could not save: " + err.Error()})
 			return
@@ -123,14 +125,14 @@ func (s *uiServer) routes() *http.ServeMux {
 			return
 		}
 		defer s.checkMu.Unlock()
-		writeJSON(w, map[string]any{"checks": runDoctorContext(r.Context(), s.client.config())})
+		writeJSON(w, map[string]any{"checks": relay.RunDoctorContext(r.Context(), s.client.Config())})
 	}))
 
 	return mux
 }
 
 func (s *uiServer) saveToken(w http.ResponseWriter, token string) {
-	if err := s.client.setToken(token); err != nil {
+	if err := s.client.SetToken(token); err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": "Could not save: " + err.Error()})
 		return
 	}
@@ -143,7 +145,7 @@ const preferredUIPort = 28472
 
 // startUI binds loopback and returns the URL to open. Loopback only: this page can
 // set the enrolment token, so it must never be reachable from the network.
-func startUI(ctx context.Context, client *relayClient) (string, error) {
+func startUI(ctx context.Context, client *relay.Client) (string, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferredUIPort))
 	if err != nil {
 		// Taken, most likely by a second copy of this program. Any free port still

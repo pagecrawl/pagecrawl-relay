@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/pagecrawl/pagecrawl-relay/relay"
 )
 
 // The settings page can set the enrolment token, so any page in the operator's
@@ -16,7 +18,7 @@ import (
 // worse than none, because it invites trusting it.
 func newTestServer() *uiServer {
 	return &uiServer{
-		client: newRelayClient(Config{}, NewState()),
+		client: relay.NewClient(relay.Config{}, relay.NewState(), fileStore{}),
 		key:    "test-key-0123456789",
 		addr:   "127.0.0.1:54321",
 	}
@@ -122,7 +124,7 @@ func TestSettingsPageReportsBeingLockedOut(t *testing.T) {
 // The page itself is served without a key (it has to be, since the browser follows a
 // plain link), so every endpoint behind it must check.
 func TestStateEndpointRefusesWithoutTheKey(t *testing.T) {
-	srv := &uiServer{key: "correct-horse", client: newRelayClient(Config{}, NewState())}
+	srv := &uiServer{key: "correct-horse", client: relay.NewClient(relay.Config{}, relay.NewState(), fileStore{})}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	if srv.authorised(req) {
@@ -152,7 +154,7 @@ func TestSettingsPageUsesAStablePort(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	url, err := startUI(ctx, newRelayClient(Config{}, NewState()))
+	url, err := startUI(ctx, relay.NewClient(relay.Config{}, relay.NewState(), fileStore{}))
 	if err != nil {
 		t.Fatalf("startUI: %v", err)
 	}
@@ -172,7 +174,7 @@ func TestSettingsPageFallsBackWhenThePortIsTaken(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	url, err := startUI(ctx, newRelayClient(Config{}, NewState()))
+	url, err := startUI(ctx, relay.NewClient(relay.Config{}, relay.NewState(), fileStore{}))
 	if err != nil {
 		t.Fatalf("startUI should fall back to any free port, got %v", err)
 	}
@@ -218,7 +220,7 @@ func TestTheSettingsURLIsRecordedForReopening(t *testing.T) {
 // curl cannot catch this, because curl does not enforce CSP. Nor can a test that only
 // greps the HTML. The header is what matters, so the header is what is asserted.
 func TestTheSettingsPageMayCallItsOwnAPI(t *testing.T) {
-	srv := &uiServer{key: "k", client: newRelayClient(Config{}, NewState())}
+	srv := &uiServer{key: "k", client: relay.NewClient(relay.Config{}, relay.NewState(), fileStore{})}
 
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))

@@ -75,7 +75,7 @@ page binds loopback and checks its random key plus any supplied Origin.
 
 ## The guard, specifically
 
-`guard.go` resolves each destination and filters refused addresses before dialing
+`relay/guard.go` resolves each destination and filters refused addresses before dialing
 an approved IP directly. There is no second DNS lookup between validation and
 connection. A name returning both public and private addresses can use only its
 approved public addresses.

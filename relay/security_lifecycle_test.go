@@ -1,4 +1,4 @@
-package main
+package relay
 
 import (
 	"bytes"
@@ -92,7 +92,7 @@ func TestSettingsChangesCancelSessionAndCloseSockets(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			isolatedConfig(t)
 			tun, peer := tunnelPair(t)
-			client := newRelayClient(tun.cfg, NewState())
+			client := NewClient(tun.cfg, NewState(), memoryStore{})
 			ctx, _, _, _ := client.session(context.Background())
 			if !client.attach(ctx, tun) {
 				t.Fatal("attach failed")
@@ -109,18 +109,18 @@ func TestSettingsChangesCancelSessionAndCloseSockets(t *testing.T) {
 			go func() {
 				defer readers.Done()
 				for i := 0; i < 1000; i++ {
-					_ = client.config()
+					_ = client.Config()
 					_ = client.state.Snapshot()
 				}
 			}()
 			var err error
 			switch action {
 			case "pause":
-				_, err = client.togglePause()
+				_, err = client.TogglePause()
 			case "forget":
-				err = client.setToken("")
+				err = client.SetToken("")
 			case "token":
-				err = client.setToken(strings.Repeat("b", 64))
+				err = client.SetToken(strings.Repeat("b", 64))
 			}
 			readers.Wait()
 			if err != nil {
@@ -306,11 +306,11 @@ func TestSupervisorResumesWithLatestSettings(t *testing.T) {
 		close(entry.closed)
 	}))
 	defer srv.Close()
-	client := newRelayClient(testConfig(srv.URL), NewState())
+	client := NewClient(testConfig(srv.URL), NewState(), memoryStore{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { supervise(ctx, client); close(done) }()
-	defer func() { cancel(); client.stop(); await(t, done) }()
+	go func() { Supervise(ctx, client); close(done) }()
+	defer func() { cancel(); client.Stop(); await(t, done) }()
 	next := func() connection {
 		t.Helper()
 		select {
@@ -330,16 +330,16 @@ func TestSupervisorResumesWithLatestSettings(t *testing.T) {
 		}
 	}
 	first := next()
-	if paused, err := client.togglePause(); err != nil || !paused {
+	if paused, err := client.TogglePause(); err != nil || !paused {
 		t.Fatal(paused, err)
 	}
 	await(t, first.closed)
 	noConnection()
-	if paused, err := client.togglePause(); err != nil || paused {
+	if paused, err := client.TogglePause(); err != nil || paused {
 		t.Fatal(paused, err)
 	}
 	second := next()
-	if err := client.setToken(strings.Repeat("b", 64)); err != nil {
+	if err := client.SetToken(strings.Repeat("b", 64)); err != nil {
 		t.Fatal(err)
 	}
 	await(t, second.closed)
@@ -347,7 +347,7 @@ func TestSupervisorResumesWithLatestSettings(t *testing.T) {
 	if third.token != "Bearer "+strings.Repeat("b", 64) {
 		t.Fatal("reconnected with stale token")
 	}
-	if err := client.setToken(""); err != nil {
+	if err := client.SetToken(""); err != nil {
 		t.Fatal(err)
 	}
 	await(t, third.closed)
@@ -357,9 +357,9 @@ func TestSupervisorResumesWithLatestSettings(t *testing.T) {
 func TestCancelledSessionCannotAttachALateConnection(t *testing.T) {
 	isolatedConfig(t)
 	tun, _ := tunnelPair(t)
-	client := newRelayClient(tun.cfg, NewState())
+	client := NewClient(tun.cfg, NewState(), memoryStore{})
 	ctx, _, _, _ := client.session(context.Background())
-	if err := client.setToken(""); err != nil {
+	if err := client.SetToken(""); err != nil {
 		t.Fatal(err)
 	}
 	if client.attach(ctx, tun) || tun.ctx.Err() == nil {

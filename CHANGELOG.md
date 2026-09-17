@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The relay itself now lives in its own `relay` package, which the desktop program
+  wraps, so another front end can run the same destination guard and protocol rather
+  than a copy of them. Nothing changes for the desktop, Docker or Home Assistant builds:
+  the binary, its flags, its settings file and `-X main.Version` all work as before.
+
 ## v0.1.5
 
 - Pause, disconnect and token changes now close active connections and cancel

@@ -5,7 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/pagecrawl/pagecrawl-relay/relay"
 )
 
 // Settings persist desktop enrolment. Flags override environment variables,
@@ -134,7 +135,7 @@ func writePrivateFile(path string, data []byte) error {
 
 // resolveConfig folds flags, environment and the config file into one Config, and
 // reports whether a token was found anywhere.
-func resolveConfig(flagGateway, flagToken string, verbose bool) (Config, bool) {
+func resolveConfig(flagGateway, flagToken string, verbose bool) (relay.Config, bool) {
 	saved := loadStored()
 
 	token := firstNonEmpty(strings.TrimSpace(flagToken), strings.TrimSpace(os.Getenv("PAGECRAWL_RELAY_TOKEN")), strings.TrimSpace(saved.Token))
@@ -143,19 +144,33 @@ func resolveConfig(flagGateway, flagToken string, verbose bool) (Config, bool) {
 		flagGateway,
 		os.Getenv("PAGECRAWL_RELAY_GATEWAY"),
 		saved.GatewayURL,
-		defaultGateway,
+		relay.DefaultGateway,
 	)
 
-	return Config{
-		GatewayURL:  gateway,
-		Token:       token,
-		Verbose:     verbose,
-		DialTimeout: 15 * time.Second,
-		// Longer than any single page load, shorter than the worker's own per-attempt
-		// cap, so a stalled stream is reclaimed before the check gives up.
-		IdleTimeout: 120 * time.Second,
-		MaxBackoff:  2 * time.Minute,
-	}, token != ""
+	cfg := relay.DefaultConfig()
+	cfg.GatewayURL = gateway
+	cfg.Token = token
+	cfg.Verbose = verbose
+	cfg.Platform = platformName()
+	cfg.Version = Version
+
+	return cfg, token != ""
+}
+
+// fileStore keeps setting changes in the desktop config file. Each write reads the file
+// first, so a change to one setting never drops another.
+type fileStore struct{}
+
+func (fileStore) SaveToken(token string) error {
+	saved := loadStored()
+	saved.Token = token
+	return saveStored(saved)
+}
+
+func (fileStore) SavePaused(paused bool) error {
+	saved := loadStored()
+	saved.Paused = paused
+	return saveStored(saved)
 }
 
 func firstNonEmpty(values ...string) string {

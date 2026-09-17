@@ -1,4 +1,4 @@
-package main
+package relay
 
 import (
 	"context"
@@ -410,8 +410,8 @@ func gatewayConnection(ctx context.Context, cfg Config, diagnostic bool) (*webso
 		return nil, fmt.Errorf("gateway url: %w", err)
 	}
 	query := endpoint.Query()
-	query.Set("platform", platformName())
-	query.Set("version", Version)
+	query.Set("platform", cfg.Platform)
+	query.Set("version", cfg.Version)
 	query.Del("diagnostic")
 	if diagnostic {
 		query.Set("diagnostic", "1")

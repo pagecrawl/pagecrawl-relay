@@ -1,10 +1,11 @@
 package main
 
 import (
-	"context"
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/pagecrawl/pagecrawl-relay/relay"
 )
 
 func TestConfigWriteReplacesBroadPermissions(t *testing.T) {
@@ -34,6 +35,8 @@ func TestConfigWriteReplacesBroadPermissions(t *testing.T) {
 	}
 }
 
+// The relay only applies a setting the store says it kept (see relay/store_test.go), so
+// the file store has to report a write it could not make rather than swallow it.
 func TestFailedSettingWriteDoesNotClaimSuccess(t *testing.T) {
 	isolatedConfig(t)
 	path, err := configPath()
@@ -43,18 +46,26 @@ func TestFailedSettingWriteDoesNotClaimSuccess(t *testing.T) {
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	client := newRelayClient(Config{Token: "original"}, NewState())
-	defer client.stop()
-	ctx, _, _, _ := client.session(context.Background())
-	if err := client.setToken("new"); err == nil {
+	client := relay.NewClient(relay.Config{Token: "original"}, relay.NewState(), fileStore{})
+	defer client.Stop()
+	if err := client.SetToken("new"); err == nil {
 		t.Fatal("expected save failure")
 	}
-	if _, err := client.togglePause(); err == nil {
+	if _, err := client.TogglePause(); err == nil {
 		t.Fatal("expected pause save failure")
 	}
-	if client.config().Token != "original" || client.state.Paused() || ctx.Err() != nil {
-		t.Fatal("failed persistence changed the running session")
+	if client.Config().Token != "original" || client.State().Paused() {
+		t.Fatal("failed persistence changed the running settings")
 	}
+}
+
+// isolatedConfig points the config directory at a temporary one, so a test never reads
+// or overwrites the settings of a relay installed on this machine.
+func isolatedConfig(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 }
 
 func TestConfiguredTokenTrimsPastedWhitespace(t *testing.T) {
@@ -63,5 +74,25 @@ func TestConfiguredTokenTrimsPastedWhitespace(t *testing.T) {
 	cfg, present := resolveConfig("", " \n", false)
 	if !present || cfg.Token != "environment-token" {
 		t.Fatal("token normalization changed precedence")
+	}
+}
+
+// The gateway is told which version and platform connected. The version is stamped at
+// build time with -X main.Version (release workflow, Dockerfile, Home Assistant add-on),
+// which only package main can see, so it has to be carried into the relay's config here
+// or every release would report itself as "dev".
+func TestConfigCarriesTheStampedVersionAndPlatform(t *testing.T) {
+	isolatedConfig(t)
+	previous := Version
+	Version = "9.8.7"
+	t.Cleanup(func() { Version = previous })
+
+	cfg, _ := resolveConfig("", "token", false)
+
+	if cfg.Version != "9.8.7" {
+		t.Fatalf("version = %q, want the stamped one", cfg.Version)
+	}
+	if cfg.Platform != platformName() {
+		t.Fatalf("platform = %q, want %q", cfg.Platform, platformName())
 	}
 }

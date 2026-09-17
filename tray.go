@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"fyne.io/systray"
+
+	"github.com/pagecrawl/pagecrawl-relay/relay"
 )
 
 func hasTray() bool { return true }
@@ -22,8 +24,8 @@ func hasTray() bool { return true }
 // runTray owns the main thread for the life of the app. systray requires that on
 // macOS, so everything else (the tunnel, the settings page) runs in goroutines
 // started before this.
-func runTray(ctx context.Context, client *relayClient, settingsURL string) {
-	state := client.state
+func runTray(ctx context.Context, client *relay.Client, settingsURL string) {
+	state := client.State()
 	systray.Run(func() {
 		systray.SetTemplateIcon(trayIcon, trayIcon)
 		systray.SetTooltip("PageCrawl Relay")
@@ -61,7 +63,7 @@ func runTray(ctx context.Context, client *relayClient, settingsURL string) {
 					openBrowser(settingsURL)
 
 				case <-pause.ClickedCh:
-					if _, err := client.togglePause(); err != nil {
+					if _, err := client.TogglePause(); err != nil {
 						log.Printf("Could not save pause: %v", err)
 					}
 
@@ -83,7 +85,7 @@ func runTray(ctx context.Context, client *relayClient, settingsURL string) {
 
 // render keeps the menu readable at a glance: the title line carries the state, so
 // the answer to "is it working" is visible without opening anything.
-func render(state *State, status, uptime, traffic, exit, pause *systray.MenuItem) {
+func render(state *relay.State, status, uptime, traffic, exit, pause *systray.MenuItem) {
 	s := state.Snapshot()
 
 	switch {

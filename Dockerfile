@@ -15,6 +15,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY *.go settings.html ./
+# The relay itself lives in its own package (see README, Layout).
+COPY relay/ ./relay/
 ARG VERSION=docker
 # CGO off: a static binary runs on scratch and on any base image, and the client
 # needs no C libraries.
