@@ -3,8 +3,8 @@
 //
 // It has no user interface and no idea where its settings live. The desktop program
 // (the pagecrawl-relay binary at the module root) wraps it with a settings page, a tray
-// icon and a config file. Keeping it separate means any other front end runs exactly this
-// code, so a fix to the guard or the protocol reaches every platform.
+// icon and a config file; the Android relay app wraps it with a foreground service. Both
+// run exactly this code, so a fix to the guard or the protocol reaches every platform.
 package relay
 
 import "time"
@@ -20,9 +20,10 @@ type Config struct {
 	IdleTimeout time.Duration
 	MaxBackoff  time.Duration
 
-	// Reported to the gateway on connect. Supplied by the caller rather than read here:
-	// the desktop binary stamps its version at build time with -X main.Version, which a
-	// library cannot see.
+	// Reported to the gateway on connect, so an operator can tell a Windows laptop
+	// from a phone. Supplied by the caller rather than read here: the desktop binary
+	// stamps its version at build time with -X main.Version, which a library cannot
+	// see, and Android reports its own app version.
 	Platform string
 	Version  string
 }
@@ -40,8 +41,9 @@ func DefaultConfig() Config {
 }
 
 // Store keeps the settings a person changes while the relay runs, so they survive a
-// restart. The desktop program writes them to its config file. A setting change is only
-// reported as saved when Store says it was, so a relay never claims a change it lost.
+// restart. The desktop program writes them to its config file; the Android app keeps
+// them in its own encrypted storage. A setting change is only reported as saved when
+// Store says it was, so a relay never claims a change it lost.
 type Store interface {
 	SaveToken(token string) error
 	SavePaused(paused bool) error

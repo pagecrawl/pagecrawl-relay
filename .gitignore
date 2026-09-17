@@ -14,3 +14,12 @@ node_modules/
 # The Android library is built from source by mobile/build-aar.sh, never committed.
 *.aar
 *-sources.jar
+
+# The Android relay app: Gradle output and local SDK paths never belong in the repository.
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+android/*.jks
+android/*.keystore

@@ -1,0 +1,7 @@
+<resources>
+    <!-- The window behind Compose. Light, and dark in values-night, so there is no flash of
+         the wrong colour before the first frame. -->
+    <style name="Theme.Relay" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

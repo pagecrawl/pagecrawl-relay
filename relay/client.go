@@ -5,9 +5,9 @@ import (
 	"sync"
 )
 
-// Client owns settings and the running session. Every front end (the settings page and
-// the tray) uses the same operations, so saving a setting and stopping its old session
-// stay together.
+// Client owns settings and the running session. Every front end (the desktop settings
+// page and tray, the Android service) uses the same operations, so saving a setting and
+// stopping its old session stay together.
 type Client struct {
 	mu      sync.Mutex
 	cfg     Config
