@@ -22,6 +22,10 @@ type State struct {
 	exitIP   string
 	lastErr  string
 	lastHost string
+	// The gateway turned this relay's token away. Worth its own flag rather than only the
+	// error text: a revoked key never recovers by retrying, so a front end should tell the
+	// person to enrol again instead of showing an endless "retrying".
+	rejected bool
 
 	// Recent destinations are bounded, kept in memory, and never persisted.
 	recent []Event
@@ -50,6 +54,7 @@ func (s *State) MarkConnected(exitIP string) {
 	s.connected = true
 	s.connectedAt = time.Now()
 	s.lastErr = ""
+	s.rejected = false
 	if exitIP != "" {
 		s.exitIP = exitIP
 	}
@@ -62,6 +67,7 @@ func (s *State) MarkDisconnected(err error) {
 	s.connected = false
 	if err != nil {
 		s.lastErr = err.Error()
+		s.rejected = IsRejected(err)
 	}
 }
 
@@ -121,6 +127,7 @@ type Snapshot struct {
 	ExitIP       string  `json:"exit_ip"`
 	LastHost     string  `json:"last_host"`
 	LastError    string  `json:"last_error"`
+	Rejected     bool    `json:"rejected"`
 	Recent       []Event `json:"recent"`
 }
 
@@ -138,6 +145,7 @@ func (s *State) Snapshot() Snapshot {
 		ExitIP:      s.exitIP,
 		LastHost:    s.lastHost,
 		LastError:   s.lastErr,
+		Rejected:    s.rejected,
 	}
 
 	// Copied, and newest first: the caller renders this without the lock, and the

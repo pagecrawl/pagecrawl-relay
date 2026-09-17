@@ -6,6 +6,9 @@
   wraps, so another front end can run the same destination guard and protocol rather
   than a copy of them. Nothing changes for the desktop, Docker or Home Assistant builds:
   the binary, its flags, its settings file and `-X main.Version` all work as before.
+- The status now reports when the gateway rejected the token, separately from an
+  ordinary disconnection, so a front end can say the token needs replacing instead of
+  retrying indefinitely.
 
 ## v0.1.5
 
