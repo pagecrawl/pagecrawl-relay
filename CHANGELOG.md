@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+- **PageCrawl Relay for Android.** A separate app that turns an Android phone into a
+  relay, running the same destination guard and protocol as the desktop program. Add it
+  by scanning the QR code under Settings, Relays, Add machine, or by pasting the token.
+  It relays on Wi-Fi by default, with mobile data as an opt-in, restarts after a reboot
+  if it was on, and has the same self-check as `-check`. Released as
+  `pagecrawl-relay-android.apk`, signed and attested like the desktop binaries.
 - The relay itself now lives in its own `relay` package, which the desktop program
-  wraps, so another front end can run the same destination guard and protocol rather
-  than a copy of them. Nothing changes for the desktop, Docker or Home Assistant builds:
-  the binary, its flags, its settings file and `-X main.Version` all work as before.
+  wraps. This is what lets the Android app run the same guard and protocol rather than
+  a copy of them. Nothing changes for the desktop, Docker or Home Assistant builds: the
+  binary, its flags, its settings file and `-X main.Version` all work as before.
 - The status now reports when the gateway rejected the token, separately from an
   ordinary disconnection, so a front end can say the token needs replacing instead of
   retrying indefinitely.

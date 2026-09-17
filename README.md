@@ -1,7 +1,7 @@
 # PageCrawl Relay client
 
-A small program you run on a computer you own. Your PageCrawl checks then leave
-from **your** connection instead of ours, which is what you want for pages only
+A small program you run on a computer, or an Android phone, you own. Your PageCrawl
+checks then leave from **your** connection instead of ours, which is what you want for pages only
 your public IP can reach: a public portal that allows your office IP, or a
 site that only serves your country. Private intranets and LAN addresses are refused.
 
@@ -30,10 +30,11 @@ See [the changelog](CHANGELOG.md) for release changes.
 | A Linux box or home server you want it running on permanently | [2. Run it as a service](#2-run-it-as-a-service) |
 | Docker, a NAS, or a homelab | [3. Docker](#3-docker) |
 | Home Assistant | [the add-on](https://github.com/pagecrawl/hass-relay-addon) |
-| A question about whether it is actually working | [4. Check it](#4-check-it) |
+| An Android phone, for example an old one left on a charger | [4. Android](#4-android) |
+| A question about whether it is actually working | [5. Check it](#5-check-it) |
 
 First, in PageCrawl: **Settings → Relays → Add machine**. Copy the token it shows.
-It is shown once.
+It is shown once. On Android you can scan the QR code shown beside it instead.
 
 ---
 
@@ -261,7 +262,62 @@ relay host most people already own.
 
 ---
 
-## 4. Check it
+## 4. Android
+
+**PageCrawl Relay for Android** is a separate app that turns an Android phone into a
+relay. It runs the same `relay` package as the desktop program, compiled for Android, so
+the destination guard, the protocol and the reconnect logic are exactly the ones described
+in this README. It does nothing else: no monitors, no alerts, no PageCrawl account.
+
+A phone makes a good relay when a check needs a home or mobile connection rather than a
+datacenter one. An old phone left on a charger is ideal.
+
+There is no iPhone version. iOS does not let an app keep a network service running in the
+background, which is the whole of what a relay does.
+
+**Install.** Download `pagecrawl-relay-android.apk` from the
+[latest release](https://github.com/pagecrawl/pagecrawl-relay/releases/latest) and open it
+on the phone. Android asks you to allow installs from that source the first time. The app
+is not in Google Play. Every release APK is signed with the same key and carries a build
+provenance attestation, like the desktop binaries:
+
+```bash
+gh attestation verify pagecrawl-relay-android.apk --repo pagecrawl/pagecrawl-relay
+```
+
+**Set it up.** In PageCrawl on your computer, open **Settings → Relays → Add machine**.
+In the app, tap **Scan QR code** and point the camera at the code, or paste the token.
+Then switch on **Relay checks**.
+
+**Wi-Fi and mobile data.** By default the relay only runs on Wi-Fi. On mobile data it
+pauses and resumes by itself when the phone is back on Wi-Fi. A metered Wi-Fi network,
+such as another phone's hotspot, counts as mobile data. Turn on **Also use mobile data**
+to relay on any connection, and set a monthly data limit for the relay in PageCrawl under
+**Settings → Relays** so a busy month cannot run up a phone bill. The
+[bandwidth guide](#bandwidth-depends-on-how-many-pages-you-check) applies to phones too.
+
+**Battery.** While relaying, the app keeps the phone and its Wi-Fi awake, because a
+sleeping phone stops answering the gateway and checks fail while the phone looks
+connected. That uses battery, so the phone is best left on a charger. The app shows a
+notification the whole time it runs, and offers to exempt itself from Android's battery
+optimisation, without which Android may pause it.
+
+**After a restart** the relay starts again by itself if it was switched on.
+
+**Check it.** **Run self-check** in the app runs the same checks as `pagecrawl-relay -check`,
+listed in the next section, without interrupting a relay that is running. The app also
+lists recent destinations, including ones the guard refused.
+
+| The app says | What it means |
+|---|---|
+| Relaying checks | Connected, and carrying checks when PageCrawl sends them. |
+| Waiting for Wi-Fi | On mobile data with **Also use mobile data** off. |
+| Key not accepted | The token was revoked, the relay was removed in PageCrawl, or it was mistyped. Remove it and add the relay again. |
+| Could not connect | No route to the gateway right now. It keeps retrying. |
+
+---
+
+## 5. Check it
 
 One command answers "is this working", in plain language:
 
@@ -409,6 +465,29 @@ The macOS menu-bar build needs CGO and a Mac to build on:
 go build -tags tray -o pagecrawl-relay-menubar .
 ```
 
+### Android app
+
+The app is two parts: `mobile/`, a small Go module that exposes the `relay` package to
+Android through [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile), and
+`android/`, the app itself in Kotlin. `mobile/` is its own Go module so its toolchain
+dependency never reaches the desktop, Docker or Home Assistant builds.
+
+You need Go, JDK 17, and the Android SDK with NDK 27. Then, from this directory:
+
+```bash
+cd mobile
+go install golang.org/x/mobile/cmd/gomobile@$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+go install golang.org/x/mobile/cmd/gobind@$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+gomobile init
+./build-aar.sh              # writes android/app/libs/relay.aar
+cd ../android
+./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk
+```
+
+A local release build is signed with your debug key, which is fine for a phone you are
+testing on. Published releases are signed with the project's release key by the release
+workflow, from repository secrets.
+
 ### Tests
 
 From the directory containing this README:
@@ -441,6 +520,16 @@ node --test settings.browser.test.cjs
 This builds and starts the real client, then checks setup, reload authorization,
 pause, disconnect, diagnostic escaping and error recovery under the page's
 Content Security Policy.
+
+The Android binding and the app have their own tests:
+
+```bash
+(cd mobile && go test -race ./...)
+(cd android && ./gradlew testDebugUnitTest)
+```
+
+They cover starting and stopping the relay from Android, reading a key from a scanned or
+pasted code, the Wi-Fi and mobile data rules, and reading the relay's status.
 
 The release workflow runs race tests, vet, 32-bit tests and a dependency
 vulnerability scan. Run the scan locally with:
@@ -494,9 +583,9 @@ to establish those inputs; a different local build can have a different checksum
 **Open, because you run it and deserve to read it:**
 
 - this client, in full: the tunnel, the destination guard, the settings page, the
-  self-check, and every test;
+  self-check, the Android app, and every test;
 - the wire format it speaks, which is documented in `relay/protocol.go`;
-- the Docker, systemd and Home Assistant packaging.
+- the Docker, systemd, Home Assistant and Android packaging.
 
 The hosted gateway and PageCrawl service are separate from this public client.
 
@@ -537,8 +626,8 @@ of which client binary is running. [SECURITY.md](SECURITY.md) describes both sid
 ## Layout
 
 The relay itself is the `relay` package. The desktop program at the root wraps it with
-flags, a settings page, a tray icon and a config file, so another front end can run the
-same guard and the same protocol rather than a copy of them.
+flags, a settings page, a tray icon and a config file; the Android relay app wraps the
+same package, so every platform runs the same guard and the same protocol.
 
 | file | role |
 |---|---|
@@ -554,7 +643,14 @@ same guard and the same protocol rather than a copy of them.
 | `config.go` | flag/env/file precedence, saved token |
 | `ui.go` | authenticated local settings API |
 | `page.go`, `settings.html` | embedded settings page, bundled logo and styles |
+| `mobile/relay.go` | the relay as an Android library: start, stop, status, self-check |
+| `mobile/build-aar.sh` | builds that library for the Android app |
+| `android/.../RelayService.kt` | runs the relay while switched on and on an allowed network |
+| `android/.../NetworkPolicy.kt` | the Wi-Fi and mobile data rules |
+| `android/.../Storage.kt` | the token, encrypted with a key held in the Android Keystore |
+| `android/.../MainActivity.kt` | the app's one screen |
 | `*_test.go`, `settings.browser.test.cjs` | Go regressions and the optional Chromium test |
+| `android/app/src/test` | the Android app's tests |
 
 The gateway speaks the same frame format, and both sides have codec tests covering
 partial frames and binary payloads.

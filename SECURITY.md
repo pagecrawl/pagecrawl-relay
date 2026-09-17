@@ -73,6 +73,26 @@ header, not a query parameter. Desktop configuration and the per-run settings UR
 are stored in the user's config directory with mode 0600 on Unix. The settings
 page binds loopback and checks its random key plus any supplied Origin.
 
+## The Android app
+
+The Android app runs the same `relay` package through a small gomobile wrapper
+(`mobile/`), so the guard, frame limits, queue limits and lifecycle rules below apply to
+it unchanged. What differs is where the token lives and when the relay runs.
+
+The token is stored encrypted with AES-GCM under a key generated in the Android Keystore,
+which does not release the key to the app. The app's data is excluded from Android
+backups, and a Keystore key does not move to another phone, so a copied or restored data
+directory holds only ciphertext and the app asks for the token again. On a rooted phone,
+or one where someone can run code as the app, the token should be treated as exposed,
+as with the desktop config file.
+
+The relay runs only while the person has switched it on, as a foreground service with a
+persistent notification that Android shows for as long as it runs. It holds a partial wake
+lock and a Wi-Fi lock only while relaying. Camera access is used for scanning the
+enrolment QR code and for nothing else; the scanned text is accepted only if it is a
+`pagecrawl-relay://enrol` link carrying a 64-character token. The app opens no listening
+port.
+
 ## The guard, specifically
 
 `relay/guard.go` resolves each destination and filters refused addresses before dialing
@@ -116,8 +136,8 @@ websocket upgrade is insufficient: the gateway must acknowledge authentication.
 
 ## Scope
 
-**In scope:** this client, the relay protocol, and the way the gateway
-authenticates and authorises relays.
+**In scope:** this client, including the Android app, the relay protocol, and the way
+the gateway authenticates and authorises relays.
 
 **Out of scope:** reports that amount to "a modified client can reach its own
 network" (see above), findings against the PageCrawl web application (report those
