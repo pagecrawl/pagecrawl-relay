@@ -120,3 +120,86 @@ jobs:
           # --clobber so re-running a build replaces the assets rather than failing
           # half way and leaving a release with some files from each attempt.
           gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+
+  # The Android relay app, attached to the same release as pagecrawl-relay-android.apk. It
+  # runs after the desktop job, which creates the release, and wraps the same relay package.
+  android:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.1'
+          cache: true
+          cache-dependency-path: mobile/go.sum
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Test the Android binding
+        working-directory: mobile
+        run: |
+          go vet ./...
+          go test -race ./...
+
+      - name: Build the relay library
+        run: |
+          set -euo pipefail
+          # The same golang.org/x/mobile version mobile/go.mod requires: gomobile bind needs
+          # its tool and the module's bind package to match, and pinning keeps a release
+          # reproducible from its tag.
+          MOBILE_VERSION="$(cd mobile && go list -m -f '{{.Version}}' golang.org/x/mobile)"
+          go install "golang.org/x/mobile/cmd/gomobile@${MOBILE_VERSION}"
+          go install "golang.org/x/mobile/cmd/gobind@${MOBILE_VERSION}"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006" >/dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.1.12297006"
+          gomobile init
+          mobile/build-aar.sh
+
+      - name: Build and sign the app
+        env:
+          RELAY_KEYSTORE_BASE64: ${{ secrets.RELAY_ANDROID_KEYSTORE_BASE64 }}
+          RELAY_KEYSTORE_PASSWORD: ${{ secrets.RELAY_ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_KEY_ALIAS: ${{ secrets.RELAY_ANDROID_KEY_ALIAS }}
+          RELAY_KEY_PASSWORD: ${{ secrets.RELAY_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+
+          # Never publish a debug-signed build. Every machine has a different debug key, and
+          # Android refuses to install an update signed with a different key than the one
+          # already on the phone, so a debug-signed release would strand everyone on it.
+          if [ -z "${RELAY_KEYSTORE_BASE64}" ]; then
+            echo "The release signing key is not configured (RELAY_ANDROID_KEYSTORE_BASE64)." >&2
+            exit 1
+          fi
+          export RELAY_KEYSTORE_FILE="${RUNNER_TEMP}/relay-release.jks"
+          echo "${RELAY_KEYSTORE_BASE64}" | base64 --decode > "${RELAY_KEYSTORE_FILE}"
+
+          cd android
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease -PrelayVersion="${TAG#v}"
+
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk ../dist/pagecrawl-relay-android.apk
+          cd ../dist && sha256sum pagecrawl-relay-android.apk > SHA256SUMS-android && cat SHA256SUMS-android
+
+      - name: Attest the build
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: 'dist/pagecrawl-relay-android.apk'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          gh release upload "$TAG" dist/pagecrawl-relay-android.apk dist/SHA256SUMS-android \
+            --clobber --repo "${{ github.repository }}"
