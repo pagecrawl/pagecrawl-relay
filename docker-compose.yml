@@ -7,7 +7,10 @@
 # Check it: docker compose exec relay pagecrawl-relay -check
 services:
   relay:
-    build: .
+    # The published image, built and attested by the release workflow. To build the
+    # bundled Dockerfile yourself instead, comment this out and uncomment `build`.
+    image: ghcr.io/pagecrawl/pagecrawl-relay:latest
+    # build: .
     container_name: pagecrawl-relay
     restart: unless-stopped
     environment:

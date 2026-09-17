@@ -223,20 +223,38 @@ one environment variable, `PAGECRAWL_RELAY_TOKEN`, and the `-headless` flag.
 
 ## 3. Docker
 
-From this directory, Compose builds the bundled Dockerfile:
+Each release publishes an image to this repository's own registry, for amd64 and
+arm64 (a NAS, a Raspberry Pi 4 or 5, an Apple silicon Mac):
+
+```bash
+docker run -d --name pagecrawl-relay --restart unless-stopped \
+  -e PAGECRAWL_RELAY_TOKEN=your-token-here \
+  ghcr.io/pagecrawl/pagecrawl-relay:latest
+```
+
+Pin a version instead of `latest` if you would rather decide when to update, for
+example `ghcr.io/pagecrawl/pagecrawl-relay:v0.1.6`.
+
+With Compose, from this directory:
 
 ```bash
 echo "PAGECRAWL_RELAY_TOKEN=your-token-here" > .env
 docker compose up -d
 ```
 
-Or build and run the image without Compose:
+Or build the bundled Dockerfile yourself, which needs no registry at all:
 
 ```bash
 docker build -t pagecrawl-relay .
 docker run -d --name pagecrawl-relay --restart unless-stopped \
   -e PAGECRAWL_RELAY_TOKEN=your-token-here \
   pagecrawl-relay
+```
+
+The published image carries a signed provenance attestation, like the binaries:
+
+```bash
+gh attestation verify oci://ghcr.io/pagecrawl/pagecrawl-relay:latest --repo pagecrawl/pagecrawl-relay
 ```
 
 **No ports are published, and none should be.** The client dials out; nothing ever
