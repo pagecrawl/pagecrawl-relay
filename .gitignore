@@ -10,3 +10,7 @@ built
 .env
 .pagecrawl-relay/
 node_modules/
+
+# The Android library is built from source by mobile/build-aar.sh, never committed.
+*.aar
+*-sources.jar
