@@ -23,6 +23,17 @@ ARG VERSION=docker
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" -o /out/pagecrawl-relay .
 
 FROM alpine:3.24
+ARG VERSION=docker
+# Standard image metadata. `image.source` is the load-bearing one: it links the
+# published package to this repository, which is what puts the README on the
+# package page and lets the package inherit the repository's access permissions.
+LABEL org.opencontainers.image.source="https://github.com/pagecrawl/pagecrawl-relay" \
+      org.opencontainers.image.url="https://pagecrawl.io" \
+      org.opencontainers.image.title="PageCrawl Relay" \
+      org.opencontainers.image.description="Carries the egress for your own PageCrawl monitors. Dials out, so it needs no published ports." \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
+
 # ca-certificates for the TLS connection to the gateway; tzdata so log timestamps
 # match the host's clock rather than UTC.
 RUN apk add --no-cache ca-certificates tzdata \
