@@ -23,7 +23,85 @@ permissions:
   attestations: write  # record it
 
 jobs:
+  # The macOS assets need a Mac: the menu-bar app is a cgo build, and codesign,
+  # notarytool and stapler only exist there. They are built first and handed to the
+  # release job, so the checksums and the attestation cover the signed files.
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.1'
+          cache: true
+          cache-dependency-path: go.sum
+
+      # The menu-bar build is the one CGO build in the project, so the Linux jobs
+      # never compile it. Without this a change to tray.go reaches a release
+      # unchecked, and the first sign of a mistake is a failed packaging step.
+      - name: Vet the menu-bar build
+        run: |
+          go vet -tags tray ./...
+          go test -race ./...
+
+      - name: Import the signing certificate
+        env:
+          CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          # Never publish an unsigned Mac build. The download links and the README
+          # promise a program that opens without a Gatekeeper warning.
+          if [ -z "${CERT_BASE64}" ] || [ -z "${NOTARY_KEY_BASE64}" ]; then
+            echo "The Developer ID certificate or the notary key is not configured." >&2
+            exit 1
+          fi
+
+          KEYCHAIN="${RUNNER_TEMP}/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "${CERT_BASE64}" | base64 --decode > "${RUNNER_TEMP}/developer-id.p12"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security import "${RUNNER_TEMP}/developer-id.p12" -k "${KEYCHAIN}" \
+            -P "${CERT_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}" >/dev/null
+          # codesign looks the identity up in the search list, so add ours to it.
+          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
+          rm "${RUNNER_TEMP}/developer-id.p12"
+
+          echo "${NOTARY_KEY_BASE64}" | base64 --decode > "${RUNNER_TEMP}/notary-key.p8"
+          echo "MACOS_KEYCHAIN=${KEYCHAIN}" >> "$GITHUB_ENV"
+          echo "NOTARY_KEY_FILE=${RUNNER_TEMP}/notary-key.p8" >> "$GITHUB_ENV"
+
+      - name: Build, sign and notarize
+        env:
+          MACOS_SIGN_IDENTITY: 'Developer ID Application: Mygtukynas, MB (8V5V2283P6)'
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: packaging/macos/build.sh "$TAG" dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the signing material
+        if: always()
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/signing.keychain-db" 2>/dev/null || true
+          rm -f "${RUNNER_TEMP}/notary-key.p8"
+
   release:
+    needs: macos
     runs-on: ubuntu-latest
 
     steps:
@@ -85,14 +163,20 @@ jobs:
               -o "dist/pagecrawl-relay-${suffix}" .
             echo "built pagecrawl-relay-${suffix}"
           done <<'TARGETS'
-          darwin arm64 darwin-arm64
-          darwin amd64 darwin-amd64
           linux amd64 linux-amd64
           linux arm64 linux-arm64
           windows amd64 windows-amd64.exe
           TARGETS
 
-          cd dist && sha256sum pagecrawl-relay-* > SHA256SUMS && cat SHA256SUMS
+      # The signed macOS binaries and app from the macos job, beside the rest so one
+      # SHA256SUMS and one attestation cover every desktop download.
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos
+          path: dist
+
+      - name: Checksums
+        run: cd dist && sha256sum pagecrawl-relay-* > SHA256SUMS && cat SHA256SUMS
 
       - name: Attest the builds
         uses: actions/attest-build-provenance@v4

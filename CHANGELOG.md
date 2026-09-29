@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.1.7
+
+- **PageCrawl Relay for Mac.** A menu-bar app, released as `pagecrawl-relay-macos.dmg`:
+  one app for Apple Silicon and Intel Macs running macOS 13 or later. The menu shows
+  whether it is connected, the data carried and the address sites see, and pauses,
+  resumes or opens the settings page. On first launch it opens the settings page so the
+  token can be pasted straight away.
+- **The Mac menu bar shows the state as an icon**, and nothing else: a filled mark
+  while relaying, pause bars when paused, and an empty outline when it is not
+  connected. The data carried no longer sits in the menu bar, where it was a number
+  that changed constantly and pushed the icons beside it along; it is still in the
+  menu, with the connection count. A token the gateway has refused now says so in
+  the menu instead of looking like an ordinary disconnection.
+- **Open at login**, a switch on the settings page in the Mac app, so a machine
+  relays from the moment you log in without being started by hand. It registers the
+  app with macOS rather than a hidden helper, so it is listed under System Settings,
+  General, Login Items like anything else, and turning it off there is respected.
+- The settings page links to Settings then Relays in PageCrawl, where a machine is
+  renamed, given a monthly data limit or removed.
+- The self-check now records the address it finds, so **Your address** shows it
+  instead of asking for a check that never filled it in.
+- **Signed and notarized for macOS.** The app and the `pagecrawl-relay-darwin-*`
+  binaries are signed with an Apple Developer ID and notarized, so macOS opens them
+  without a malware warning. Asset names are unchanged.
+
 ## v0.1.6
 
 - **PageCrawl Relay for Android.** A separate app that turns an Android phone into a

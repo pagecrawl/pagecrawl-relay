@@ -1,0 +1,8 @@
+# Secret scan configuration (see .github/workflows/secrets.yml). The default rules,
+# plus an allowance for the one fixture that looks like a key and is not one.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The settings-page test fixture, a fake key that only exists in ui_test.go"
+regexes = ['''test-key-0123456789''']

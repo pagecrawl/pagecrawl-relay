@@ -49,7 +49,17 @@ func TestDiagnosticRequiresAuthenticationAcknowledgement(t *testing.T) {
 			}))
 			defer srv.Close()
 			cfg := testConfig(srv.URL)
-			cfg.DialTimeout = 100 * time.Millisecond
+
+			// Every outcome but one arrives immediately, so the timeout is only a
+			// backstop and wants headroom: at 100ms a loaded machine running the
+			// race detector read the socket before the close frame landed, and the
+			// check reported a timeout instead of the rejection the gateway sent.
+			// The "timeout" case is the one that waits for it to expire, so it keeps
+			// a short one and the suite does not pause for a second on its account.
+			cfg.DialTimeout = 5 * time.Second
+			if outcome == "timeout" {
+				cfg.DialTimeout = 100 * time.Millisecond
+			}
 			result := gatewayCheck(context.Background(), cfg)
 			if result.OK != (outcome == "ack") {
 				t.Fatalf("%s: %+v", outcome, result)

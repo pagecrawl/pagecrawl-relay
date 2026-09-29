@@ -81,13 +81,36 @@ func (s *uiServer) routes() *http.ServeMux {
 
 	mux.HandleFunc("/api/state", s.api(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.client.Config()
+		// A build that cannot open itself at login reports so rather than failing:
+		// the page leaves the control out instead of offering a dead switch.
+		login, _ := loginItemStatus()
 		writeJSON(w, map[string]any{
 			"state":      s.client.State().Snapshot(),
 			"configured": cfg.Token != "",
 			"gateway":    cfg.GatewayURL,
 			"version":    Version,
 			"platform":   platformName(),
+			"login_item": login,
 		})
+	}))
+
+	mux.HandleFunc("/api/login-item", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if err := setLoginItem(body.Enabled); err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		login, _ := loginItemStatus()
+		writeJSON(w, map[string]any{"ok": true, "login_item": login})
 	}))
 
 	mux.HandleFunc("/api/token", s.api(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +148,7 @@ func (s *uiServer) routes() *http.ServeMux {
 			return
 		}
 		defer s.checkMu.Unlock()
-		writeJSON(w, map[string]any{"checks": relay.RunDoctorContext(r.Context(), s.client.Config())})
+		writeJSON(w, map[string]any{"checks": s.client.RunDoctor(r.Context())})
 	}))
 
 	return mux

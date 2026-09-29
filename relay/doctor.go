@@ -32,7 +32,14 @@ func RunDoctor(cfg Config) []CheckResult {
 	return RunDoctorContext(context.Background(), cfg)
 }
 
+// RunDoctorContext runs the checks without recording anything. Use Client.RunDoctor
+// to have the exit address the check discovers kept for the status display.
 func RunDoctorContext(parent context.Context, cfg Config) []CheckResult {
+	return runDoctor(parent, cfg, nil)
+}
+
+// state may be nil, for `-check`, which reports to a terminal and exits.
+func runDoctor(parent context.Context, cfg Config, state *State) []CheckResult {
 	ctx, cancel := context.WithTimeout(parent, doctorTimeout)
 	defer cancel()
 	var out []CheckResult
@@ -101,10 +108,15 @@ func RunDoctorContext(parent context.Context, cfg Config) []CheckResult {
 		Detail: "Requests to your own network are refused; public sites are allowed.",
 	})
 
-	// One outbound request reports the public exit address.
-	out = append(out, exitAddressCheck(ctx))
+	// One outbound request reports the public exit address. It is the only check
+	// that learns something worth keeping: the status display has no other way to
+	// know the address, because nothing else asks an outside service what it sees.
+	result, ip := exitAddressCheck(ctx)
+	if ip != "" && state != nil {
+		state.SetExitIP(ip)
+	}
 
-	return out
+	return append(out, result)
 }
 
 // A websocket upgrade alone does not authenticate the token. Only the explicit
@@ -147,13 +159,14 @@ func gatewayCheck(ctx context.Context, cfg Config) CheckResult {
 
 // exitAddressCheck reports the public address this machine egresses from, which is
 // the address monitored pages will see when a check is relayed.
-func exitAddressCheck(parent context.Context) CheckResult {
+// Returns the check to display and, when it succeeded, the address itself.
+func exitAddressCheck(parent context.Context) (CheckResult, string) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
 	if err != nil {
-		return CheckResult{Name: "Exit address", OK: false, Detail: "Could not build the request."}
+		return CheckResult{Name: "Exit address", OK: false, Detail: "Could not build the request."}, ""
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -162,7 +175,7 @@ func exitAddressCheck(parent context.Context) CheckResult {
 			Name: "Exit address", OK: false,
 			Detail: "Could not determine it: " + err.Error(),
 			Fix:    "Not fatal. It only means this self-check could not reach the address service.",
-		}
+		}, ""
 	}
 	defer resp.Body.Close()
 
@@ -170,11 +183,11 @@ func exitAddressCheck(parent context.Context) CheckResult {
 	ip := strings.TrimSpace(string(body))
 
 	if resp.StatusCode != http.StatusOK || net.ParseIP(ip) == nil {
-		return CheckResult{Name: "Exit address", OK: false, Detail: "The address service did not return a valid IP address."}
+		return CheckResult{Name: "Exit address", OK: false, Detail: "The address service did not return a valid IP address."}, ""
 	}
 
 	return CheckResult{
 		Name: "Exit address", OK: true,
 		Detail: ip + " - this is the address monitored sites will see.",
-	}
+	}, ip
 }

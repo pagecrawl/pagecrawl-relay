@@ -23,3 +23,24 @@ android/app/build/
 android/local.properties
 android/*.jks
 android/*.keystore
+
+# Signing material. The Apple Developer ID certificate, the notary API key and the
+# Android keystore live outside the repository (iCloud) and reach CI only as
+# repository secrets. These patterns stop a copy dropped here from being committed,
+# and this monorepo autocommits.
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+*.jks
+*.keystore
+*.b64
+AuthKey_*
+*password*.txt

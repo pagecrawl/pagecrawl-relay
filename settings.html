@@ -49,6 +49,8 @@
   input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   button:disabled { opacity: .5; cursor: default; }
   .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-weight: 400; cursor: pointer; }
+  .toggle input { width: auto; min-height: 0; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .msg { margin-top: 10px; font-size: 13px; overflow-wrap: anywhere; }
   .msg:empty { margin-top: 0; }
   .msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
@@ -206,6 +208,11 @@ l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
     <h2>This machine</h2>
     <div class="row"><span>Gateway</span><span id="s-gw">-</span></div>
     <div class="row"><span>Version</span><span id="s-ver">-</span></div>
+    <div class="row" id="loginRow" hidden>
+      <span>Open at login</span>
+      <span><label class="toggle"><input type="checkbox" id="loginItem"><span id="loginState">Off</span></label></span>
+    </div>
+    <div class="msg" id="loginMsg"></div>
     <div class="actions">
       <button class="ghost" id="forget">Disconnect this machine</button>
     </div>
@@ -214,6 +221,11 @@ l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
       listed in PageCrawl until you remove it there.
     </p>
     <div class="msg" id="forgetMsg"></div>
+    <p class="sub fine-print">
+      Rename this machine, set a monthly data limit or remove it in
+      <a href="https://pagecrawl.io/app/settings/relays" target="_blank" rel="noreferrer noopener">PageCrawl,
+      under Settings then Relays</a>.
+    </p>
   </div>
 
   <footer>
@@ -265,8 +277,16 @@ l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
   const esc = v => String(v).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+  // Set while a login-item change is in flight, so the two-second redraw does not
+  // snap the switch back to the state the server has not been told about yet.
+  let loginBusy = false;
+
+  const needsApproval =
+    'Turned off in System Settings, General, Login Items. Switch PageCrawl Relay back on there.';
+
   function render(d) {
     const s = d.state;
+    renderLoginItem(d.login_item || {});
     $('setup').hidden = d.configured;
     $('status').hidden = !d.configured;
     $('ver').textContent = d.version + ' · ' + d.platform;
@@ -299,6 +319,24 @@ l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
       : '<div class="empty">Nothing yet. Point a monitor at this machine and run a check.</div>';
     $('stateMsg').textContent = (!s.connected && !s.paused && s.last_error) ? s.last_error : '';
     $('stateMsg').className = 'msg bad';
+  }
+
+  function renderLoginItem(login) {
+    $('loginRow').hidden = !login.supported;
+
+    if (!login.supported || loginBusy) return;
+
+    $('loginItem').checked = !!login.enabled;
+    $('loginState').textContent = login.enabled ? 'On' : 'Off';
+
+    // macOS keeps the registration but honours the person's own switch, so saying
+    // where that switch is beats registering again and reporting success.
+    if (login.needs_approval) {
+      $('loginMsg').textContent = needsApproval;
+      $('loginMsg').className = 'msg bad';
+    } else if ($('loginMsg').textContent === needsApproval) {
+      $('loginMsg').textContent = '';
+    }
   }
 
   function lockedOut(message) {
@@ -371,6 +409,39 @@ l-89 120 47 26 c110 63 110 219 1 283 -29 18 -56 22 -165 24 -71 2 -133 0
     return action('forget', 'forgetMsg', async () => {
       result('forgetMsg', await call('/api/forget', { method: 'POST' }), 'Disconnected. Paste a token to connect again.');
     });
+  };
+
+  $('loginItem').onchange = async () => {
+    const on = $('loginItem').checked;
+
+    loginBusy = true;
+    $('loginItem').disabled = true;
+    $('loginMsg').textContent = '';
+
+    try {
+      const response = await call('/api/login-item', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: on }),
+      });
+
+      if (!response.ok) throw new Error(response.error || 'Could not change the setting.');
+
+      $('loginMsg').textContent = on
+        ? 'PageCrawl Relay will open when you log in.'
+        : 'PageCrawl Relay will not open at login.';
+      $('loginMsg').className = 'msg ok';
+    } catch (err) {
+      // Put the switch back: it should never show a setting that was not saved.
+      $('loginItem').checked = !on;
+      $('loginMsg').textContent = err.unauthorised
+        ? 'This page is no longer authorised. Reopen it with pagecrawl-relay -open.'
+        : err.message;
+      $('loginMsg').className = 'msg bad';
+    } finally {
+      loginBusy = false;
+      $('loginItem').disabled = false;
+      refresh();
+    }
   };
 
   $('runCheck').onclick = () => action('runCheck', 'checkList', async () => {

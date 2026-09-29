@@ -119,8 +119,10 @@ func main() {
 			fmt.Printf("PageCrawl Relay is running.\nSettings: %s\n", url)
 
 			// Open the browser only when there is nothing to relay yet. Someone
-			// already set up does not want a window every time they log in.
-			if !hasToken && !hasTray() {
+			// already set up does not want a window every time they log in. The
+			// menu-bar app does it too: freshly downloaded, a "!" in the menu bar is
+			// all anyone would see, with no hint that a token goes in Settings.
+			if !hasToken {
 				openBrowser(url)
 			}
 		}

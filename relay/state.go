@@ -60,6 +60,17 @@ func (s *State) MarkConnected(exitIP string) {
 	}
 }
 
+// SetExitIP records the public address the self-check found. It outlives a
+// disconnection on purpose: the address the machine egresses from is a property of
+// the network, not of the tunnel, so clearing it on every reconnect would leave the
+// status display blank most of the time for no reason.
+func (s *State) SetExitIP(ip string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.exitIP = ip
+}
+
 func (s *State) MarkDisconnected(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

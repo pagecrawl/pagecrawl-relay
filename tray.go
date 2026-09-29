@@ -10,7 +10,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"log"
 	"time"
 
@@ -27,25 +26,25 @@ func hasTray() bool { return true }
 func runTray(ctx context.Context, client *relay.Client, settingsURL string) {
 	state := client.State()
 	systray.Run(func() {
-		systray.SetTemplateIcon(trayIcon, trayIcon)
-		systray.SetTooltip("PageCrawl Relay")
+		m := &menu{}
+		m.setIcon(iconStarting)
 
-		status := systray.AddMenuItem("Starting...", "")
-		status.Disable()
+		m.status = systray.AddMenuItem("Starting...", "")
+		m.status.Disable()
 
-		uptime := systray.AddMenuItem("", "How long this machine has been relaying")
-		uptime.Disable()
+		m.uptime = systray.AddMenuItem("", "How long this machine has been relaying")
+		m.uptime.Disable()
 
-		traffic := systray.AddMenuItem("", "Data carried for your monitors")
-		traffic.Disable()
+		m.traffic = systray.AddMenuItem("", "Data carried for your monitors")
+		m.traffic.Disable()
 
-		exit := systray.AddMenuItem("", "The address monitored sites see")
-		exit.Disable()
+		m.exit = systray.AddMenuItem("", "The address monitored sites see")
+		m.exit.Disable()
 
 		systray.AddSeparator()
 
-		settings := systray.AddMenuItem("Settings and self-check", "Open the settings page")
-		pause := systray.AddMenuItem("Pause relaying", "Stop carrying checks until resumed")
+		settings := systray.AddMenuItem("Settings", "Open the settings page")
+		m.pause = systray.AddMenuItem("Pause relaying", "Stop carrying checks until resumed")
 
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Quit PageCrawl Relay", "Stop relaying and exit")
@@ -57,17 +56,17 @@ func runTray(ctx context.Context, client *relay.Client, settingsURL string) {
 			for {
 				select {
 				case <-tick.C:
-					render(state, status, uptime, traffic, exit, pause)
+					m.render(state)
 
 				case <-settings.ClickedCh:
 					openBrowser(settingsURL)
 
-				case <-pause.ClickedCh:
+				case <-m.pause.ClickedCh:
 					if _, err := client.TogglePause(); err != nil {
 						log.Printf("Could not save pause: %v", err)
 					}
 
-					render(state, status, uptime, traffic, exit, pause)
+					m.render(state)
 
 				case <-ctx.Done():
 					systray.Quit()
@@ -83,48 +82,60 @@ func runTray(ctx context.Context, client *relay.Client, settingsURL string) {
 	}, func() {})
 }
 
-// render keeps the menu readable at a glance: the title line carries the state, so
-// the answer to "is it working" is visible without opening anything.
-func render(state *relay.State, status, uptime, traffic, exit, pause *systray.MenuItem) {
-	s := state.Snapshot()
+// The icon carries the state, so the menu bar stays one glyph wide. The text that
+// used to sit beside it (the data carried) is a number nobody needs at all times,
+// and it shoves every icon to its left along as it grows. The menu still has it.
+type menu struct {
+	status, uptime, traffic, exit, pause *systray.MenuItem
 
-	switch {
-	case s.Paused:
-		status.SetTitle("Paused")
-		systray.SetTitle("")
-	case s.Connected:
-		status.SetTitle("Connected")
-		// Data carried sits in the menu bar itself: it is the number people want to
-		// keep an eye on, because it is their bandwidth.
-		systray.SetTitle(s.Traffic)
-	default:
-		status.SetTitle("Not connected")
-		systray.SetTitle("!")
-	}
-
-	if s.Connected && s.ConnectedFor != "" {
-		uptime.SetTitle("Connected for " + s.ConnectedFor)
-	} else {
-		uptime.SetTitle("Running for " + s.Uptime)
-	}
-
-	traffic.SetTitle(fmt.Sprintf("%s carried, %d connections", s.Traffic, s.Connections))
-
-	if s.ExitIP != "" {
-		exit.SetTitle("Your address: " + s.ExitIP)
-	} else {
-		exit.SetTitle("Your address: run a check")
-	}
-
-	if s.Paused {
-		pause.SetTitle("Resume relaying")
-	} else {
-		pause.SetTitle("Pause relaying")
-	}
+	// The icon on screen, so it is replaced only when the state actually changes
+	// rather than on every tick.
+	shown trayState
+	set   bool
 }
 
-// A 16x16 template icon. macOS recolours a template automatically for light and
-// dark menu bars, so one asset covers both.
+func (m *menu) setIcon(s trayState) {
+	if m.set && m.shown == s {
+		return
+	}
+
+	icon := trayIconOffline
+
+	switch s {
+	case iconRelaying:
+		icon = trayIconRelaying
+	case iconPaused:
+		icon = trayIconPaused
+	}
+
+	systray.SetTemplateIcon(icon, icon)
+	systray.SetTooltip(s.tooltip())
+
+	m.shown, m.set = s, true
+}
+
+// render keeps the menu readable at a glance: the icon answers "is it working" from
+// the menu bar, and the first line spells the same thing out in words.
+func (m *menu) render(state *relay.State) {
+	lines := linesFor(state.Snapshot())
+
+	m.setIcon(lines.state)
+	m.status.SetTitle(lines.status)
+	m.uptime.SetTitle(lines.uptime)
+	m.traffic.SetTitle(lines.traffic)
+	m.exit.SetTitle(lines.exit)
+	m.pause.SetTitle(lines.pause)
+}
+
+// 32x32 template icons, one per state, drawn by packaging/macos/trayicon. A template
+// is recoloured by macOS, so one file each covers light and dark menu bars, and 32
+// pixels drawn at 16 points keeps them sharp on a Retina display.
 //
 //go:embed icon.png
-var trayIcon []byte
+var trayIconRelaying []byte
+
+//go:embed icon-paused.png
+var trayIconPaused []byte
+
+//go:embed icon-offline.png
+var trayIconOffline []byte

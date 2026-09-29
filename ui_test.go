@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -238,5 +239,73 @@ func TestTheSettingsPageMayCallItsOwnAPI(t *testing.T) {
 	// The rest of the policy is the point of having one: no remote anything.
 	if !strings.Contains(csp, "default-src 'none'") {
 		t.Fatalf("the page must still deny everything it does not need: %q", csp)
+	}
+}
+
+// The login-item control changes what happens at every boot, so it sits behind the
+// same key as setting a token. A missing check here would let any page in the
+// operator's browser register the relay to start with the machine.
+func TestLoginItemNeedsTheKey(t *testing.T) {
+	s := newTestServer()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/login-item", strings.NewReader(`{"enabled":true}`))
+	s.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 without the key", rec.Code)
+	}
+}
+
+// Only the macOS app can register itself, so every other build has to say no in a
+// way the page can render. Answering 500, or pretending it worked, would leave a
+// switch that reports a setting the machine does not have.
+func TestLoginItemReportsWhatThisBuildCanDo(t *testing.T) {
+	s := newTestServer()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	req.Header.Set("X-Relay-Key", s.key)
+	s.routes().ServeHTTP(rec, req)
+
+	var state struct {
+		LoginItem loginItem `json:"login_item"`
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+
+	supported, _ := loginItemStatus()
+	if state.LoginItem.Supported != supported.Supported {
+		t.Fatalf("state reports supported=%v, want %v", state.LoginItem.Supported, supported.Supported)
+	}
+
+	if supported.Supported {
+		// The menu-bar build on a Mac: leave the real registration alone, since a
+		// test has no business changing what happens when the operator logs in.
+		return
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/login-item", strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("X-Relay-Key", s.key)
+	s.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want a readable answer rather than an error page", rec.Code)
+	}
+
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if body.OK || body.Error == "" {
+		t.Fatalf("got ok=%v error=%q, want a refusal that says why", body.OK, body.Error)
 	}
 }

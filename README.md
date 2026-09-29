@@ -26,6 +26,7 @@ See [the changelog](CHANGELOG.md) for release changes.
 | You have | Go to |
 |---|---|
 | A Mac or Linux machine, and you are happy with one command | [Homebrew](#install-with-homebrew) |
+| A Mac, and you do not want a menu-bar icon | [Homebrew](#install-with-homebrew), as a service |
 | A Mac or Windows PC, and you have never used a terminal | [1. Just run it](#1-just-run-it) |
 | A Linux box or home server you want it running on permanently | [2. Run it as a service](#2-run-it-as-a-service) |
 | Docker, a NAS, or a homelab | [3. Docker](#3-docker) |
@@ -61,10 +62,8 @@ For a machine that should relay whenever it is awake:
 brew services start pagecrawl-relay
 ```
 
-**Note:** the binaries are not code-signed yet, so macOS may warn when opening a
-browser download. Homebrew provides a convenient install and update path. See
-[macOS says it cannot check the app for malware](#macos-says-it-cannot-check-the-app-for-malware)
-for other installation options and download verification.
+Homebrew installs the command-line program. For the menu-bar app, download it as in
+[1. Just run it](#1-just-run-it).
 
 ---
 
@@ -77,6 +76,15 @@ No terminal needed.
 3. Paste the token and press **Connect**.
 
 Closing the page leaves the relay running; quitting the app stops it.
+
+**On a Mac** the download is `pagecrawl-relay-macos.dmg`, one app for Apple Silicon and
+Intel. Open it, drag **PageCrawl Relay** to Applications, and open it from there. It
+lives in the menu bar rather than the Dock, as an icon with no text beside it: filled
+while it is relaying, two pause bars when paused, and an empty outline when it is not
+connected. The menu behind it shows how long it has been connected, the data carried,
+the address sites see, and has **Settings**, **Pause relaying** and
+**Quit PageCrawl Relay**. To relay whenever you are logged in, turn on **Open at
+login** on the settings page. It needs macOS 13 or later.
 
 ### Settings page
 
@@ -91,6 +99,7 @@ Relaying and network diagnostics still need a connection.
 | Pause / Resume | Stops active connections without forgetting the token. The paused state survives a restart. |
 | Run a check | Checks connectivity and authentication without interrupting the running tunnel. |
 | Recent activity | Shows the last 40 successful destinations and policy refusals. This list stays in memory and resets on restart. |
+| Open at login | Opens the app when you log in, so the machine relays without being started by hand. macOS app only; the service wrappers below cover the same ground elsewhere. |
 | Disconnect this machine | Closes connections and forgets the saved token. Remove the machine in PageCrawl separately to delete its listing. |
 
 **Reopening the settings page.** The page keeps its access key in the current tab,
@@ -100,15 +109,33 @@ so reloading works. To open a new tab or return after restarting the relay:
 pagecrawl-relay -open
 ```
 
-That opens the page for the relay already running under your user account. The app
-opens it automatically on first setup; later starts run without opening a browser.
+That opens the page for the relay already running under your user account. On a Mac,
+**Settings** in the menu bar does the same. The app opens it
+automatically on first setup; later starts run without opening a browser.
 The page listens only on this computer. Opening its bare address in a fresh tab
 does not grant access to its status or controls.
 
-**About the menu bar.** The published binaries have no menu-bar icon. It needs CGO and
-a Mac to build on, which would cost the plain binary its one-machine cross-compile to
-every platform, so it is a separate build (`go build -tags tray`). The settings page is
-the interface for the published builds.
+**About the menu bar.** Only the Mac app has a menu-bar icon. It needs CGO and a Mac to
+build on, which would cost the plain binary its one-machine cross-compile to every
+platform, so it is a separate build (`go build -tags tray`), packaged by
+`packaging/macos/build.sh`. On Windows and Linux, and for the command-line program on a
+Mac, the settings page is the interface.
+
+**A Mac relay with no menu-bar icon.** The app cannot hide its own icon: it has no Dock
+icon either, so hiding it would leave no way to open the settings, pause it or quit. Run
+the command-line program instead, which has no menu-bar presence at all and starts again
+after a reboot:
+
+```bash
+brew install pagecrawl/tap/pagecrawl-relay
+pagecrawl-relay                       # once, to paste the token
+brew services start pagecrawl-relay   # from now on, in the background
+```
+
+Reach it at any time with `pagecrawl-relay -open` for the settings page, or
+`pagecrawl-relay -check` for a self-check. A menu-bar manager such as
+[Ice](https://github.com/jordanbaird/Ice) hides the app's icon if you would rather keep
+the app itself.
 
 **Where your token is kept:** `config.json` in your user config folder:
 `~/Library/Application Support/pagecrawl-relay/` on macOS,
@@ -121,32 +148,22 @@ PageCrawl's proxies while it is away. Retry and error policies keep content chec
 on the selected relay and defer them until it returns; the error policy also
 reports the offline failure. For reliable availability, use a machine that stays awake.
 
-### macOS says it cannot check the app for malware
+### Signed and notarized on macOS
 
-The binaries are not signed with an Apple Developer ID, so macOS may block a
-download it cannot verify. [Verify the download](#checking-that-a-download-is-the-real-thing)
-before choosing to run it.
-
-You can install through Homebrew as shown above, or download from the public
-release with `curl`:
+The Mac app and the macOS command-line binaries are signed with an Apple Developer ID
+in the name of **Mygtukynas, MB**, the company behind PageCrawl, and notarized by Apple,
+so they open without a Gatekeeper warning. To see the signature yourself:
 
 ```bash
-curl -fsSL -o pagecrawl-relay \
-  https://github.com/pagecrawl/pagecrawl-relay/releases/latest/download/pagecrawl-relay-darwin-arm64
-chmod +x pagecrawl-relay
-./pagecrawl-relay
+codesign -dv --verbose=2 "/Applications/PageCrawl Relay.app"
+spctl --assess --verbose=2 "/Applications/PageCrawl Relay.app"
 ```
 
-Use `pagecrawl-relay-darwin-amd64` on an Intel Mac.
+`Authority=Developer ID Application: Mygtukynas, MB (8V5V2283P6)` and
+`source=Notarized Developer ID` are what to look for. Releases before v0.1.7 were not
+signed.
 
-If you already downloaded and verified it, clear the quarantine flag on that file:
-
-```bash
-xattr -d com.apple.quarantine ~/Downloads/pagecrawl-relay-darwin-arm64
-chmod +x ~/Downloads/pagecrawl-relay-darwin-arm64
-```
-
-Or build it yourself with Go:
+You can also build it yourself with Go:
 
 ```bash
 go install github.com/pagecrawl/pagecrawl-relay@latest
@@ -159,7 +176,7 @@ carries a signed provenance attestation. You can verify that the file you have w
 built by that workflow from this source, rather than uploaded by hand:
 
 ```bash
-gh attestation verify pagecrawl-relay-darwin-arm64 --repo pagecrawl/pagecrawl-relay
+gh attestation verify pagecrawl-relay-macos.dmg --repo pagecrawl/pagecrawl-relay
 ```
 
 Every release also ships `SHA256SUMS`:
@@ -171,8 +188,9 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 The attestation identifies the source and build workflow. It serves a different
 purpose from platform code signing and does not replace reviewing the source.
 
-Windows SmartScreen may also warn ("Windows protected your PC"). After verifying
-the download, choose **More info** then **Run anyway**, or build from source.
+The Windows binary is not code-signed yet, so Windows SmartScreen may warn
+("Windows protected your PC"). After verifying the download, choose **More info** then
+**Run anyway**, or build from source.
 
 ---
 
@@ -235,12 +253,31 @@ docker run -d --name pagecrawl-relay --restart unless-stopped \
 Pin a version instead of `latest` if you would rather decide when to update, for
 example `ghcr.io/pagecrawl/pagecrawl-relay:v0.1.6`.
 
-With Compose, from this directory:
+With Compose, the whole file is this. Save it as `docker-compose.yml` anywhere:
+
+```yaml
+services:
+  relay:
+    image: ghcr.io/pagecrawl/pagecrawl-relay:latest
+    container_name: pagecrawl-relay
+    restart: unless-stopped
+    environment:
+      PAGECRAWL_RELAY_TOKEN: your-token-here
+    # No ports. The client dials out; nothing connects to it.
+```
+
+then:
 
 ```bash
-echo "PAGECRAWL_RELAY_TOKEN=your-token-here" > .env
 docker compose up -d
 ```
+
+To keep the token out of the file, write `PAGECRAWL_RELAY_TOKEN=your-token-here` in a
+`.env` beside it and use `PAGECRAWL_RELAY_TOKEN: ${PAGECRAWL_RELAY_TOKEN}` instead.
+
+The [`docker-compose.yml`](docker-compose.yml) in this repository is the same service
+with that `.env` already wired up, plus the hardening a relay should run with anyway:
+no new privileges, every capability dropped, a read-only filesystem and capped logs.
 
 Or build the bundled Dockerfile yourself, which needs no registry at all:
 
@@ -482,6 +519,11 @@ The macOS menu-bar build needs CGO and a Mac to build on:
 ```bash
 go build -tags tray -o pagecrawl-relay-menubar .
 ```
+
+`packaging/macos/build.sh <tag> dist` builds everything the release ships for macOS:
+both command-line binaries and `pagecrawl-relay-macos.dmg` with the universal menu-bar
+app. Without `MACOS_SIGN_IDENTITY` it signs them ad hoc, which runs on your own Mac;
+the release workflow signs with the Developer ID and notarizes.
 
 ### Android app
 

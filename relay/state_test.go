@@ -41,3 +41,24 @@ func TestConnectingClearsAnEarlierRejection(t *testing.T) {
 		t.Fatal("still reported as rejected after connecting")
 	}
 }
+
+// The exit address is discovered by the self-check and by nothing else, so losing it
+// on a reconnect would leave the status showing "run a check" almost permanently:
+// the tunnel drops and reattaches on its own, without anyone watching.
+func TestExitAddressSurvivesAReconnect(t *testing.T) {
+	state := NewState()
+	state.SetExitIP("203.0.113.7")
+
+	state.MarkDisconnected(errors.New("network went away"))
+
+	if got := state.Snapshot().ExitIP; got != "203.0.113.7" {
+		t.Fatalf("after a disconnection ExitIP = %q, want it kept", got)
+	}
+
+	// Reconnecting knows nothing about the public address, and must not blank it.
+	state.MarkConnected("")
+
+	if got := state.Snapshot().ExitIP; got != "203.0.113.7" {
+		t.Fatalf("after reconnecting ExitIP = %q, want it kept", got)
+	}
+}

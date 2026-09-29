@@ -84,6 +84,12 @@ func (c *Client) session(parent context.Context) (context.Context, Config, bool,
 	return ctx, c.cfg, c.state.Paused(), c.changed
 }
 
+// RunDoctor runs the self-check and keeps what it learns, so the exit address it
+// discovers shows up in the status rather than being printed once and forgotten.
+func (c *Client) RunDoctor(ctx context.Context) []CheckResult {
+	return runDoctor(ctx, c.Config(), c.state)
+}
+
 func (c *Client) attach(ctx context.Context, t *tunnel) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
