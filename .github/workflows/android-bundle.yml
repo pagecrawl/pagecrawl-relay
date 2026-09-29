@@ -1,0 +1,101 @@
+# Build the Google Play upload bundle (.aab) for a tag that has already been released.
+#
+#   gh workflow run "Play bundle" -f tag=v0.1.7
+#
+# Separate from Release on purpose. Release publishes the files people download, and
+# re-running it rebuilds and re-signs every one of them, which changes their checksums
+# and breaks the Homebrew formula that pins them. This touches nothing that has been
+# published: the bundle is a build artifact, collected here and uploaded to Play by
+# hand, because Play is the only place an .aab is any use.
+#
+# The APK on the release page stays the way to install without Play, and both come
+# from the same tag and the same signing key.
+name: Play bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Released tag to build the Play bundle from (e.g. v0.1.7)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.1'
+          cache: true
+          cache-dependency-path: mobile/go.sum
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build the relay library
+        run: |
+          set -euo pipefail
+          # The gomobile version mobile/go.mod requires: the tool and the bound
+          # package have to match, and pinning keeps the bundle reproducible.
+          MOBILE_VERSION="$(cd mobile && go list -m -f '{{.Version}}' golang.org/x/mobile)"
+          go install "golang.org/x/mobile/cmd/gomobile@${MOBILE_VERSION}"
+          go install "golang.org/x/mobile/cmd/gobind@${MOBILE_VERSION}"
+          # A finite stream of answers rather than `yes`, which is still writing when
+          # sdkmanager exits and dies of a broken pipe; with pipefail that fails the
+          # step even though the NDK installed.
+          printf 'y\n%.0s' $(seq 1 50) |
+              "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006" >/dev/null
+          test -d "$ANDROID_HOME/ndk/27.1.12297006"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.1.12297006"
+          gomobile init
+          mobile/build-aar.sh
+
+      - name: Build and sign the bundle
+        env:
+          RELAY_KEYSTORE_BASE64: ${{ secrets.RELAY_ANDROID_KEYSTORE_BASE64 }}
+          RELAY_KEYSTORE_PASSWORD: ${{ secrets.RELAY_ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_KEY_ALIAS: ${{ secrets.RELAY_ANDROID_KEY_ALIAS }}
+          RELAY_KEY_PASSWORD: ${{ secrets.RELAY_ANDROID_KEY_PASSWORD }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Play refuses an upload signed with anything but the registered key, and a
+          # debug key differs on every machine, so never let one through.
+          if [ -z "${RELAY_KEYSTORE_BASE64}" ]; then
+            echo "The release signing key is not configured (RELAY_ANDROID_KEYSTORE_BASE64)." >&2
+            exit 1
+          fi
+          export RELAY_KEYSTORE_FILE="${RUNNER_TEMP}/relay-release.jks"
+          echo "${RELAY_KEYSTORE_BASE64}" | base64 --decode > "${RELAY_KEYSTORE_FILE}"
+
+          cd android
+          ./gradlew --no-daemon bundleRelease -PrelayVersion="${TAG#v}"
+
+          mkdir -p ../dist
+          cp app/build/outputs/bundle/release/app-release.aab "../dist/pagecrawl-relay-${TAG}.aab"
+
+          cd ../dist
+          sha256sum "pagecrawl-relay-${TAG}.aab"
+          # The version Play sorts by. It has to climb with every upload, so print it
+          # here rather than leaving it to be discovered by a rejected upload.
+          unzip -p "pagecrawl-relay-${TAG}.aab" BUNDLE-METADATA/com.android.tools.build.gradle/app-metadata.properties 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: play-bundle-${{ inputs.tag }}
+          path: dist/
+          if-no-files-found: error
+          # Long enough to upload it to Play, short enough that a signed build is not
+          # left lying around: it can be rebuilt from the tag at any time.
+          retention-days: 7
