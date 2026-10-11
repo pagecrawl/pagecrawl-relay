@@ -353,36 +353,61 @@ your carrier's bill: network usage includes both download and upload traffic, pl
 overhead. Check Android's usage statistics or your carrier's report. The
 [bandwidth guide](#bandwidth-depends-on-how-many-pages-you-check) applies to phones too.
 
-**Optional experimental Assistant mode (v0.1.10 or later).** You can manually reconnect
-mobile data without rooting a supported phone. Ordinary relaying does not need Assistant
-mode. Selecting Relay as your digital assistant replaces your current assistant.
+**Optional experimental Assistant mode.** You can reconnect mobile data without rooting
+a supported phone. Ordinary relaying does not need Assistant mode. Selecting Relay as
+your digital assistant replaces your current assistant.
 
-Reconnects start only when you tap the button. There is no periodic or random schedule.
-In v0.1.11 or later, **Wait for idle (seconds)** requires 5 to 300 seconds without active
-Relay connections or traffic before starting, with a 30-second default. New activity
-restarts the wait. This is separate from **Airplane mode pause (seconds)**, which sets
-how long mobile data stays disconnected. The idle wait does not check other apps or calls,
-and new checks can still start after the idle window.
+The upcoming v0.1.12 release adds the coordinated pause and schedule described below.
+These controls require the PageCrawl reconnect update before they can run.
+
+In v0.1.12 or later, reconnect manually with **Reconnect mobile data**, or enable an
+optional fixed interval. Scheduling is off by default. Choose an interval from 5 to
+1,440 minutes; the initial value is 30 minutes. A due reconnect waits for the phone to
+be ready and for Relay to become idle. The next interval starts after the attempt
+finishes, including a manual attempt, so missed intervals do not cause a burst of
+reconnects. The interval is a minimum wait between attempts, not an exact clock time.
+
+**Wait for idle (seconds)** requires 5 to 300 seconds without active Relay connections
+or traffic before starting, with a 30-second default. New activity restarts the wait.
+This is separate from **Airplane mode pause (seconds)**, which sets how long mobile data
+stays disconnected. The idle wait does not check other apps or calls, and new checks can
+still start after the idle window.
 
 1. Tap **Set up Assistant mode** and select PageCrawl Relay as Android's digital assistant.
    This replaces your current assistant. You can change it back through **Assistant settings**.
-2. Turn Wi-Fi off and confirm the phone has working mobile data. If **Relay checks** is
-   enabled, also enable **Also use mobile data**.
+2. Turn Wi-Fi off and confirm the phone has working mobile data. Turn on **Relay checks**
+   and **Also use mobile data**, then wait for **Relaying checks**.
 3. Set **Wait for idle (seconds)** and **Airplane mode pause (seconds)**. The defaults
    are 30 idle seconds and a 10-second pause with airplane mode on.
-4. Tap **Reconnect mobile data** and confirm. After the idle wait, the app turns airplane mode on, waits for
+4. Tap **Reconnect mobile data** and confirm to test a manual cycle. Keep the phone
+   awake and unlocked. After the idle wait, the app turns airplane mode on, waits for
    the chosen pause, turns it off and waits for cellular internet to return.
 5. Inspect the public IPv4 comparison and wait for **Relaying checks** before using the
    phone for another monitor check.
+6. For repeated reconnects, set **Reconnect interval (minutes)**, turn on
+   **Scheduled reconnects** and confirm **Enable schedule**. Leave **Relay checks**
+   and **Also use mobile data** on, with Wi-Fi off and Relay connected.
 
-The cycle temporarily disconnects the phone and can interrupt checks and calls. Checks
-follow your PageCrawl offline policy while the relay is unavailable. The idle wait measures
-Relay connections and traffic, and does not prevent a new check from starting. Choose a waiting policy if those checks must keep the
-cellular route, and reconnect between checks.
+Scheduled reconnects require working mobile data, Relay's selected Assistant mode,
+and an awake, unlocked phone. The schedule waits while those conditions are unavailable.
+Relay does not need to be the foreground app while its service is running, but it cannot
+unlock the phone. For a dedicated phone, leave Relay open on a charger; its screen stays
+on while relaying and the schedule are enabled and Assistant mode is ready. The card
+shows when the next reconnect is due, or why it is waiting. Ordinary relaying can still
+run with the screen off.
 
-**Known limitation:** an interrupted check using a waiting policy can remain postponed
-for up to 24 hours after the phone reconnects. Verify that scheduled monitoring resumes
-after testing a reconnect. Backend coordination of planned reconnects is not implemented.
+The cycle temporarily disconnects the phone and can interrupt checks and calls. Outside
+the confirmed reconnect pause, checks follow your PageCrawl offline policy while the relay
+is unavailable. The idle wait measures Relay connections and traffic only. Choose
+a waiting policy if those checks must keep the cellular route. Test a reconnect and
+verify that scheduled monitoring resumes before leaving the phone unattended.
+
+Before changing the connection, Relay asks PageCrawl to briefly hold checks for this
+phone. If PageCrawl cannot confirm that pause, mobile data is not interrupted. The pause
+ends when mobile internet returns and automatically expires within five minutes if
+the phone stops responding. Your normal offline policy then applies if the phone remains
+unavailable. An enrolled, connected Relay is required for both manual
+and scheduled reconnects.
 
 Assistant support varies by Android version and device; the app reports when this mode is
 unsupported or not ready. A reconnect does not guarantee a different address. The app
@@ -392,7 +417,10 @@ It does not measure IPv6. The pause is adjustable, but no duration guarantees a 
 
 Use **Cancel reconnect** to stop a cycle. If the app reports that recovery is needed,
 use **Turn airplane mode off** or **Open airplane mode settings** and restore connectivity
-before continuing. The native control is manual; it does not schedule reconnects.
+before continuing. If Relay does not stay idle within 10 minutes, the attempt stops
+without enabling airplane mode. **Cancel reconnect** stops the current cycle while
+leaving the schedule enabled. Turn off **Scheduled reconnects** to stop both automatic
+attempts and any current scheduled cycle.
 
 Keep the phone unlocked when starting a reconnect. If Android stops Relay during a cycle,
 check airplane mode in Settings; recovery resumes when Relay opens or its selected

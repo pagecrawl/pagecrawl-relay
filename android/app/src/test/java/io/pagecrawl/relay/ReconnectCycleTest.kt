@@ -28,6 +28,16 @@ class ReconnectCycleTest {
         var duringPause: (() -> Unit)? = null
         var holdWhileOn: CompletableDeferred<Unit>? = null
         var holdRestore: CompletableDeferred<Unit>? = null
+        var beginFails = false
+        var completionFails = false
+        var completionThrows = false
+        var leaseStored = true
+        var leaseDurationSeconds: Int? = null
+        var duringBegin: (() -> Unit)? = null
+        var afterOff: (() -> Unit)? = null
+        var backendLease: BackendReconnectLease? = null
+        val backendHolds = mutableListOf<Int>()
+        var backendCompletions = 0
         val enabled = CompletableDeferred<Unit>()
         val restoring = CompletableDeferred<Unit>()
         var ip: String? = "192.0.2.1"
@@ -35,6 +45,25 @@ class ReconnectCycleTest {
         val timeline = mutableListOf<String>()
         override fun startError() = error
         override fun relayActivity(): RelayActivity? = if (activity == null) RelayActivity(0, 0) else activity!!.invoke()
+        override fun pendingBackendLease() = backendLease
+        override suspend fun beginBackendReconnect(holdSeconds: Int): BackendReconnectLease? {
+            backendHolds += holdSeconds
+            timeline += "backend:begin"
+            if (beginFails) return null
+            backendLease = BackendReconnectLease(
+                "fe598cca-bd87-4b21-8f0a-25feff53c428", clock + (leaseDurationSeconds ?: holdSeconds) * 1_000L, leaseStored,
+            )
+            duringBegin?.invoke()
+            return backendLease
+        }
+        override suspend fun completeBackendReconnect(lease: BackendReconnectLease): Boolean {
+            backendCompletions += 1
+            timeline += "backend:complete"
+            if (completionThrows) error("PageCrawl is unreachable.")
+            if (completionFails) return false
+            if (backendLease?.id == lease.id) backendLease = null
+            return true
+        }
         override fun airplaneOn(): Boolean {
             if (unknownRadio) error("Could not read airplane mode.")
             return on
@@ -57,6 +86,7 @@ class ReconnectCycleTest {
             if (enabled && failOn || !enabled && failOff) error("Assistant action unavailable.")
             if (!enabled) { restoring.complete(Unit); holdRestore?.await() }
             if (!enabled || onObserved) on = enabled
+            if (!enabled) afterOff?.invoke()
             if (enabled) this.enabled.complete(Unit)
         }
         override suspend fun probeIp(): String? {
@@ -156,6 +186,210 @@ class ReconnectCycleTest {
         assertEquals("Wi-Fi is active.", state.message)
         assertTrue(env.commands.isEmpty())
         assertFalse(env.marker)
+    }
+
+    @Test fun scheduledRelayPrerequisitesAreRecheckedThroughoutTheIdleWait() = runBlocking {
+        val ready = ScheduledReconnectEligibility(true, true, true, true, true, false, false, null)
+        for (lost in listOf(
+            ready.copy(relayEnabled = false),
+            ready.copy(relayRunning = false),
+            ready.copy(mobileDataAllowed = false),
+            ready.copy(connected = false),
+        )) {
+            val env = Environment()
+            env.duringPause = { env.error = lost.blockedReason() }
+            var state = ReconnectState()
+            ReconnectCycle(env) { state = it }.run(1, 30)
+            assertEquals(ReconnectPhase.ERROR, state.phase)
+            assertEquals(lost.blockedReason(), state.message)
+            assertTrue(env.commands.isEmpty())
+            assertFalse(env.marker)
+        }
+    }
+
+    @Test fun scheduledRelayDisconnectAfterTheIdleWindowIsCheckedBeforeRadioChanges() = runBlocking {
+        val env = Environment()
+        env.activity = {
+            if (env.clock >= 5_000) {
+                env.error = ScheduledReconnectEligibility(true, true, true, true, false, false, false, null).blockedReason()
+            }
+            RelayActivity(0, 0)
+        }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("Waiting for Relay to connect"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun informsBackendOnlyAfterTheFullIdleWaitAndBeforeRadioChanges() = runBlocking {
+        val env = Environment()
+        var beganAt = -1L
+        env.duringBegin = { beganAt = env.clock }
+        ReconnectCycle(env) {}.run(10, 30)
+        assertEquals(30_000L, beganAt)
+        assertEquals(listOf(180), env.backendHolds)
+        assertTrue(env.timeline.indexOf("backend:begin") < env.timeline.indexOf("marker:true"))
+        assertTrue(env.timeline.indexOf("backend:complete") > env.timeline.indexOf("command:false"))
+        assertEquals(1, env.backendCompletions)
+        assertNull(env.backendLease)
+    }
+
+    @Test fun backendPauseIsAlwaysBoundedBelowFiveMinutes() = runBlocking {
+        val env = Environment()
+        ReconnectCycle(env) {}.run(120, 5)
+        assertEquals(listOf(290), env.backendHolds)
+        assertTrue(env.backendHolds.single() <= 300)
+    }
+
+    @Test fun backendAcknowledgmentFailureNeverChangesRadios() = runBlocking {
+        val env = Environment().apply { beginFails = true }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(10, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("PageCrawl did not confirm"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun failedLeaseRecoverySaveReleasesLeaseWithoutChangingRadios() = runBlocking {
+        val env = Environment().apply { leaseStored = false }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(10, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+        assertEquals(1, env.backendCompletions)
+        assertNull(env.backendLease)
+    }
+
+    @Test fun nearlyExpiredBackendPauseIsReleasedWithoutChangingRadios() = runBlocking {
+        val env = Environment().apply { leaseDurationSeconds = 30 }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(10, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("too close to expiry"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+        assertEquals(1, env.backendCompletions)
+    }
+
+    @Test fun trafficDuringAcknowledgmentReleasesBackendPauseWithoutChangingRadios() = runBlocking {
+        for (activity in listOf(RelayActivity(1, 1), RelayActivity(0, 1))) {
+            val env = Environment()
+            env.duringBegin = { env.activity = { activity } }
+            var state = ReconnectState()
+            ReconnectCycle(env) { state = it }.run(10, 5)
+            assertEquals(ReconnectPhase.ERROR, state.phase)
+            assertTrue(state.message.contains("New Relay activity"))
+            assertTrue(env.commands.isEmpty())
+            assertFalse(env.marker)
+            assertEquals(1, env.backendCompletions)
+            assertNull(env.backendLease)
+        }
+    }
+
+    @Test fun cancellationDuringAcknowledgmentLearnsAndReleasesLeaseWithoutRadioChanges() = runBlocking {
+        val env = Environment()
+        var state = ReconnectState()
+        val operation = launch { ReconnectCycle(env) { state = it }.run(10, 5) }
+        env.duringBegin = { operation.cancel() }
+        operation.join()
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("canceled"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+        assertEquals(1, env.backendCompletions)
+        assertNull(env.backendLease)
+    }
+
+    @Test fun completionFailureCannotPreventAirplaneModeRestoration() = runBlocking {
+        for (throws in listOf(false, true)) {
+            val env = Environment().apply {
+                completionFails = !throws
+                completionThrows = throws
+            }
+            var state = ReconnectState()
+            ReconnectCycle(env) { state = it }.run(1, 5)
+            assertEquals(ReconnectPhase.COMPLETE, state.phase)
+            assertEquals(listOf(true, false), env.commands)
+            assertFalse(env.on)
+            assertFalse(env.marker)
+            assertTrue(state.backendWaitPending)
+            assertTrue(state.message.contains("expires within five minutes"))
+        }
+    }
+
+    @Test fun backendCompletionPrecedesOptionalIpVerification() = runBlocking {
+        val env = Environment()
+        val states = mutableListOf<ReconnectState>()
+        ReconnectCycle(env, states::add).run(1, 5)
+        assertTrue(states.indexOfFirst { it.phase == ReconnectPhase.RESUMING_CHECKS } <
+            states.indexOfFirst { it.phase == ReconnectPhase.VERIFYING_IP })
+        assertEquals(1, env.backendCompletions)
+    }
+
+    @Test fun missingMobileInternetAfterOffLeavesOnlyBoundedBackendPause() = runBlocking {
+        val env = Environment()
+        env.afterOff = { env.internet = false }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertFalse(env.on)
+        assertFalse(env.marker)
+        assertEquals(0, env.backendCompletions)
+        assertTrue(state.backendWaitPending)
+        assertTrue(state.message.contains("expires within five minutes"))
+        assertTrue(env.clock < 70_000)
+    }
+
+    @Test fun crashRecoveryRestoresRadiosEvenIfBackendCompletionFails() = runBlocking {
+        val env = Environment().apply {
+            on = true
+            marker = true
+            completionFails = true
+            backendLease = BackendReconnectLease("fe598cca-bd87-4b21-8f0a-25feff53c428", 300_000)
+        }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.recover()
+        assertEquals(listOf(false), env.commands)
+        assertFalse(env.on)
+        assertFalse(env.marker)
+        assertEquals(1, env.backendCompletions)
+        assertTrue(state.backendWaitPending)
+        assertEquals(ReconnectPhase.COMPLETE, state.phase)
+    }
+
+    @Test fun unconfirmedRadioRecoveryDoesNotReleaseTheBackendPause() = runBlocking {
+        val env = Environment().apply { unsettledOn = true }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 5)
+        assertEquals(ReconnectPhase.RECOVERY_REQUIRED, state.phase)
+        assertFalse(env.on)
+        assertTrue(env.marker)
+        assertEquals(0, env.backendCompletions)
+        assertTrue(state.backendWaitPending)
+    }
+
+    @Test fun backendOnlyCrashCleanupDoesNotToggleRadios() = runBlocking {
+        val env = Environment().apply {
+            backendLease = BackendReconnectLease("fe598cca-bd87-4b21-8f0a-25feff53c428", 300_000)
+        }
+        ReconnectCycle(env) {}.recoverBackendLease()
+        assertTrue(env.commands.isEmpty())
+        assertEquals(1, env.backendCompletions)
+        assertNull(env.backendLease)
+    }
+
+    @Test fun expiredBackendCleanupCannotLeaveTheControlsBusy() = runBlocking {
+        val env = Environment()
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.recoverBackendLease()
+        assertEquals(ReconnectPhase.COMPLETE, state.phase)
+        assertFalse(state.busy)
+        assertTrue(env.commands.isEmpty())
+        assertEquals(0, env.backendCompletions)
     }
 
     @Test fun verifiesBothAddressesAndPersistsBeforeChangingRadio() = runBlocking {

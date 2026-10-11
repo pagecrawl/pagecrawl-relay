@@ -45,7 +45,7 @@ data class AssistantSupport(
     val reason: String,
 )
 
-/** Only the local UI can start a cycle. Assistant invocations without its one-use token do nothing. */
+/** Local UI and the opted-in schedule can start cycles. Untokened assistant invocations do nothing. */
 object AssistantReconnect {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutable = MutableStateFlow(ReconnectState())
@@ -54,6 +54,7 @@ object AssistantReconnect {
     private var service: RelayVoiceInteractionService? = null
     private var session: RelayVoiceInteractionSession? = null
     private var job: Job? = null
+    private var jobScheduled = false
     private var pending: Command? = null
     private val dispatched = mutableMapOf<String, Command>()
     private val ledger = RadioRestoreLedger()
@@ -96,7 +97,14 @@ object AssistantReconnect {
     @MainThread
     fun initialize(context: Context) {
         app = context.applicationContext
-        if (job?.isCompleted == false || !restoreNeeded(context)) return
+        ReconnectScheduler.initialize(context)
+        if (job?.isCompleted == false) return
+        if (!restoreNeeded(context)) {
+            if (AndroidEnvironment(context.applicationContext).pendingBackendLease() != null) {
+                begin(context) { it.recoverBackendLease() }
+            }
+            return
+        }
         mutable.value = ReconnectState(
             ReconnectPhase.RECOVERY_REQUIRED,
             "A reconnect was interrupted. Turn airplane mode off in Android settings, or retry recovery with Relay selected as your assistant.",
@@ -106,19 +114,30 @@ object AssistantReconnect {
     }
 
     @MainThread
-    fun start(context: Context, pauseSeconds: Int = 10, idleSeconds: Int = 30): Boolean {
+    fun start(context: Context, pauseSeconds: Int = 10, idleSeconds: Int = 30, scheduled: Boolean = false): Boolean {
         if (job?.isCompleted == false) return false
         if (restoreNeeded(context)) {
             initialize(context)
             return false
         }
         app = context.applicationContext
-        begin(context) { it.run(pauseSeconds, idleSeconds) }
+        begin(context, scheduled) { it.run(pauseSeconds, idleSeconds) }
         return true
     }
 
     @MainThread
     fun cancel() { job?.cancel() }
+
+    @MainThread
+    internal fun cancelScheduled() { if (jobScheduled) job?.cancel() }
+
+    internal fun readinessError(context: Context): String? = runCatching {
+        when {
+            restoreNeeded(context) -> "Complete reconnect recovery before automatic reconnects can continue."
+            airplaneOn(context) -> "Turn airplane mode off before automatically reconnecting mobile data."
+            else -> AndroidEnvironment(context.applicationContext).startError()
+        }
+    }.getOrElse { "Could not verify the phone's reconnect settings. Open Relay and check Android settings." }
 
     @MainThread
     fun recover(context: Context): Boolean {
@@ -192,7 +211,7 @@ object AssistantReconnect {
         .addCategory(Intent.CATEGORY_VOICE)
         .putExtra(Settings.EXTRA_AIRPLANE_MODE_ENABLED, enabled)
 
-    private fun begin(context: Context, operation: suspend (ReconnectCycle) -> Unit) {
+    private fun begin(context: Context, scheduled: Boolean? = null, operation: suspend (ReconnectCycle) -> Unit) {
         val application = context.applicationContext
         val cycle = ReconnectCycle(AndroidEnvironment(application)) { mutable.value = it }
         mutable.value = ReconnectState(ReconnectPhase.CHECKING_IP, "Preparing reconnect.")
@@ -217,27 +236,47 @@ object AssistantReconnect {
                     notifyRecovery(application)
                 }
                 else application.getSystemService(NotificationManager::class.java).cancel(RECOVERY_NOTIFICATION)
+                jobScheduled = false
+                if (scheduled != null) ReconnectScheduler.reconnectFinished(application)
             }
         }
         job = next
+        jobScheduled = scheduled == true
         next.start()
     }
 
     private class AndroidEnvironment(private val context: Context) : ReconnectEnvironment {
+        private val coordinator = AndroidReconnectCoordinator(context) { cellular(context) }
+
         override fun startError(): String? {
             val availability = support(context)
             if (!availability.ready) return availability.reason
             if (context.getSystemService(KeyguardManager::class.java).isKeyguardLocked ||
                 !context.getSystemService(PowerManager::class.java).isInteractive) {
-                return "Unlock the phone and keep Relay open to start reconnecting."
+                return "Unlock the phone and keep its screen on to start reconnecting."
             }
             if (cellular(context) == null) return "Use mobile data with Wi-Fi and VPN turned off before reconnecting."
             val settings = RelaySettings(context)
             if ((settings.enabled || RelayMonitor.state.value.running) && !settings.allowMobileData) {
                 return "Enable Also use mobile data before reconnecting while Relay checks is on."
             }
-            return null
+            val relay = RelayMonitor.state.value
+            return ScheduledReconnectEligibility(
+                relayEnabled = settings.enabled,
+                mobileDataAllowed = settings.allowMobileData,
+                relayRunning = relay.running,
+                networkAllowed = relay.decision == NetworkPolicy.Decision.RUN,
+                connected = RelayMonitor.currentStatus()?.connected == true,
+                reconnectBusy = false,
+                recoveryRequired = false,
+                readinessError = null,
+            ).blockedReason()?.replace("automatic reconnects", "reconnects")?.replace("automatically reconnecting", "reconnecting")
         }
+
+        override fun pendingBackendLease() = coordinator.pendingLease()
+        override suspend fun beginBackendReconnect(holdSeconds: Int) = coordinator.begin(holdSeconds)
+        override suspend fun completeBackendReconnect(lease: BackendReconnectLease) = coordinator.complete(lease)
+        override fun wallNow() = System.currentTimeMillis()
 
         override fun airplaneOn() = airplaneOn(context)
         override fun cellularAvailable() = cellular(context) != null

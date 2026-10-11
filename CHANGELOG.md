@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.1.12 (unreleased)
+
+- **Optional fixed-interval reconnects on Android.** Choose an interval from 5 to
+  1,440 minutes, initially 30 minutes. Scheduling is off by default; manual reconnects
+  remain available. Each due attempt waits for the configured idle window before
+  switching airplane mode on.
+- Start the next interval after an attempt finishes, including a manual attempt.
+  Missed intervals do not cause a burst of reconnects. The schedule waits while Relay
+  is disconnected, mobile data is unavailable, Assistant mode is not ready, or the
+  phone is asleep or locked.
+- Show the next reconnect's due time and the reason a scheduled attempt is waiting.
+  Keep the screen on while Relay is open with relaying, a reconnect schedule and
+  Assistant mode ready. The phone must remain awake and unlocked for scheduled
+  reconnects; Relay's running service can handle an attempt while another app is in
+  the foreground.
+- Turn off **Scheduled reconnects** to stop automatic attempts and any current
+  scheduled cycle. **Cancel reconnect** stops the current cycle while leaving the
+  schedule enabled.
+- Require PageCrawl to confirm a brief pause for the phone's checks before changing
+  the connection. Release the pause when mobile internet returns; it expires within
+  five minutes if the phone stops responding. Manual and scheduled reconnects require
+  an enrolled, connected Relay.
+
+The interval is a minimum wait between attempts, rather than an exact clock time.
+Reconnects still wait for Relay activity to become idle, and a carrier may retain the
+same public IP. Ordinary relaying does not require Assistant mode or a reconnect schedule.
+
 ## v0.1.11
 
 - Android's manual **Reconnect mobile data** control now waits for Relay to stay idle
@@ -14,10 +41,6 @@
 The idle wait measures Relay activity, not other apps or phone calls. It reduces the
 chance of interrupting a check, but does not reserve an idle window against new checks.
 Your carrier may retain the same public IP after reconnecting.
-
-**Known limitation:** an interrupted check using a waiting policy can remain postponed
-for up to 24 hours after the phone reconnects. This requires a PageCrawl backend recovery
-update, independently of the Android app. Verify that scheduled monitoring resumes.
 
 ## v0.1.10
 
@@ -38,10 +61,6 @@ update, independently of the Android app. Verify that scheduled monitoring resum
 Reconnects can interrupt checks and calls. The control is manual, does not schedule
 reconnects and does not wait for active checks to finish. PageCrawl follows the configured
 offline policy while the relay is unavailable.
-
-**Known limitation:** an interrupted check using a waiting policy can remain postponed
-for up to 24 hours after the phone reconnects. Reconnect between checks and verify that
-scheduled monitoring resumes. Backend coordination of planned reconnects is not implemented.
 
 ## v0.1.7
 

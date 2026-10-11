@@ -100,6 +100,7 @@ class RelayService : Service() {
     private val statusTicker = object : Runnable {
         override fun run() {
             publish()
+            ReconnectScheduler.tick(this@RelayService)
             main.postDelayed(this, STATUS_INTERVAL_MS)
         }
     }
@@ -108,6 +109,7 @@ class RelayService : Service() {
         super.onCreate()
         connectivity = getSystemService(ConnectivityManager::class.java)
         settings = RelaySettings(this)
+        ReconnectScheduler.initialize(this)
         RelayMonitor.statusReader = { relay?.statusJSON()?.let(RelayStatus::fromJson) }
         createChannel()
     }
@@ -164,6 +166,7 @@ class RelayService : Service() {
         releaseLocks()
 
         RelayMonitor.update(ServiceState())
+        ReconnectScheduler.relayStopped(this)
         super.onDestroy()
     }
 

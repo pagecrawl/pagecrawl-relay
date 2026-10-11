@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +23,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,6 +43,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import java.text.DateFormat
+import java.util.Date
 
 /** Optional phone controls, kept separate from starting and stopping ordinary relaying. */
 @Composable
@@ -49,19 +53,31 @@ internal fun AssistantModeCard() {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val preferences = remember { context.getSharedPreferences("relay_assistant_ui", Context.MODE_PRIVATE) }
     val state by AssistantReconnect.state.collectAsStateWithLifecycle()
+    val schedule by ReconnectScheduler.state.collectAsStateWithLifecycle()
+    val relay by RelayMonitor.state.collectAsStateWithLifecycle()
     var support by remember { mutableStateOf(AssistantReconnect.support(context)) }
     var pauseText by remember {
         mutableStateOf(preferences.getInt("pause_seconds", 10).coerceIn(1, 120).toString())
     }
     var confirmReconnect by remember { mutableStateOf(false) }
+    var confirmSchedule by remember { mutableStateOf(false) }
+    var intervalText by remember {
+        mutableStateOf(preferences.getInt("schedule_interval_minutes", 30).coerceIn(5, 1440).toString())
+    }
     var idleText by remember {
         mutableStateOf(preferences.getInt("idle_seconds", 30).coerceIn(5, 300).toString())
     }
     var setupProblem by remember { mutableStateOf<String?>(null) }
     val pauseSeconds = pauseText.toIntOrNull()?.takeIf { it in 1..120 }
     val idleSeconds = idleText.toIntOrNull()?.takeIf { it in 5..300 }
+    val intervalMinutes = intervalText.toIntOrNull()?.takeIf { it in 5..1440 }
 
-    val keepScreenOn = state.busy
+    fun configureSchedule(enabled: Boolean, minutes: Int) {
+        setupProblem = if (ReconnectScheduler.configure(context, enabled, minutes)) null
+        else "The reconnect schedule could not be saved. Try again."
+    }
+
+    val keepScreenOn = state.busy || (schedule.enabled && relay.running && support.ready)
     DisposableEffect(context, keepScreenOn) {
         val window = (context as? Activity)?.window
         val alreadyKeptOn = window?.attributes?.flags?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
@@ -77,6 +93,7 @@ internal fun AssistantModeCard() {
     }
 
     LaunchedEffect(lifecycle) {
+        ReconnectScheduler.initialize(context)
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (isActive) {
                 support = AssistantReconnect.support(context)
@@ -100,9 +117,15 @@ internal fun AssistantModeCard() {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "Reconnects start only when you tap the button. There is no periodic or random schedule.",
+                "Reconnect manually or enable a fixed interval. Each reconnect waits for Relay to stay idle first.",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (schedule.enabled && (!support.selected || !support.supported)) {
+                Text("Scheduled reconnects are waiting for Assistant mode to be available and selected.")
+                OutlinedButton(onClick = { configureSchedule(false, schedule.intervalMinutes) }) {
+                    Text("Turn schedule off")
+                }
+            }
 
             if (!support.supported) {
                 Text(support.reason, style = MaterialTheme.typography.bodyMedium)
@@ -159,14 +182,55 @@ internal fun AssistantModeCard() {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    OutlinedTextField(
+                        value = intervalText,
+                        onValueChange = { value ->
+                            intervalText = value.filter(Char::isDigit).take(4)
+                            intervalText.toIntOrNull()?.takeIf { it in 5..1440 }?.let {
+                                configureSchedule(schedule.enabled, it)
+                            }
+                        },
+                        label = { Text("Reconnect interval (minutes)") },
+                        supportingText = { Text("Choose 5 to 1440 minutes between attempts. The next interval starts when a reconnect finishes.") },
+                        isError = intervalMinutes == null,
+                        singleLine = true,
+                        enabled = !state.busy && !state.recoveryRequired,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Scheduled reconnects", modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = schedule.enabled,
+                            enabled = schedule.enabled || (support.ready && intervalMinutes != null && pauseSeconds != null && idleSeconds != null && !state.busy && !state.recoveryRequired),
+                            onCheckedChange = { enabled ->
+                                if (enabled) confirmSchedule = true
+                                else configureSchedule(false, intervalMinutes ?: schedule.intervalMinutes)
+                            },
+                        )
+                    }
+                    if (schedule.enabled) {
+                        schedule.nextAttemptAt?.let {
+                            Text("Next reconnect due: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        schedule.waitingReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
+                    Text(
+                        "The schedule runs while Relay checks is on and this phone is awake and unlocked. " +
+                            "Leave Relay open on a charger to keep its screen on. Missed intervals do not cause extra reconnects.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Button(
-                        enabled = support.ready && pauseSeconds != null && idleSeconds != null && !state.busy && !state.recoveryRequired,
+                        enabled = support.ready && relay.running && relay.status.connected && pauseSeconds != null && idleSeconds != null && !state.busy && !state.recoveryRequired,
                         onClick = { confirmReconnect = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Reconnect mobile data") }
+                    if (!relay.running || !relay.status.connected) {
+                        Text("Turn Relay checks on and wait for Relaying checks before reconnecting.", style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(
                         "Keep Relay open and the phone unlocked through the wait. Its screen stays on during the cycle. " +
-                            "Use mobile data with Wi-Fi off. If relaying is enabled, also turn on Also use mobile data. " +
+                            "Keep Relay checks on, enable Also use mobile data, and use mobile data with Wi-Fi off. " +
                             "The IP comparison uses ipify to check this phone's public IPv4 before and after reconnecting.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -218,8 +282,9 @@ internal fun AssistantModeCard() {
                 Text(
                     "After ${idleSeconds ?: 30} idle seconds, Relay temporarily disconnects this phone. " +
                         "New Relay activity restarts the wait; other apps and calls are not checked. " +
-                        "Your carrier may keep the same IP. Checks follow your PageCrawl offline policy. " +
-                        "An interrupted check using a waiting policy can remain postponed for up to 24 hours after reconnecting. " +
+                        "PageCrawl must confirm a brief pause for this phone's checks before the connection changes. " +
+                        "The pause ends when mobile internet returns and expires within five minutes. " +
+                        "Your carrier may keep the same IP. Your normal offline policy applies after the pause. " +
                         "If recovery is interrupted, turn airplane mode off in Settings.",
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
@@ -233,6 +298,32 @@ internal fun AssistantModeCard() {
             dismissButton = {
                 TextButton(onClick = { confirmReconnect = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    if (confirmSchedule) {
+        AlertDialog(
+            onDismissRequest = { confirmSchedule = false },
+            title = { Text("Schedule mobile reconnects?") },
+            text = {
+                Text(
+                    "Relay schedules the next reconnect ${intervalMinutes ?: 30} minutes after each attempt finishes. " +
+                        "Each reconnect waits for ${idleSeconds ?: 30} idle seconds first. " +
+                        "PageCrawl must confirm a brief pause for this phone's checks before the connection changes. " +
+                        "The pause ends when mobile internet returns and expires within five minutes. " +
+                        "This temporarily disconnects the whole phone and can interrupt calls or other apps. " +
+                        "Keep Relay checks on, allow mobile data, and keep the phone awake and unlocked. " +
+                        "Your carrier may keep the same public IP. Turn Scheduled reconnects off to stop the schedule.",
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSchedule = false
+                    intervalMinutes?.let { configureSchedule(true, it) }
+                }) { Text("Enable schedule") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSchedule = false }) { Text("Cancel") } },
         )
     }
 }
