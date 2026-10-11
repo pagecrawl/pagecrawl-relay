@@ -25,7 +25,7 @@ gomobile bind \
   -androidapi 26 \
   -javapkg io.pagecrawl.relay.go \
   -trimpath \
-  -ldflags "-s -w" \
+  -ldflags "-s -w -extldflags '-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384'" \
   -o "$out/relay.aar" \
   .
 

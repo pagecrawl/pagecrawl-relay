@@ -322,7 +322,7 @@ relay host most people already own.
 **PageCrawl Relay for Android** is a separate app that turns an Android phone into a
 relay. It runs the same `relay` package as the desktop program, compiled for Android, so
 the destination guard, the protocol and the reconnect logic are exactly the ones described
-in this README. It does nothing else: no monitors, no alerts, no PageCrawl account.
+in this README. Monitoring, history and alerts remain in your PageCrawl account.
 
 A phone makes a good relay when a check needs a home or mobile connection rather than a
 datacenter one. An old phone left on a charger is ideal.
@@ -348,8 +348,48 @@ Then switch on **Relay checks**.
 pauses and resumes by itself when the phone is back on Wi-Fi. A metered Wi-Fi network,
 such as another phone's hotspot, counts as mobile data. Turn on **Also use mobile data**
 to relay on any connection, and set a monthly data limit for the relay in PageCrawl under
-**Settings → Relays** so a busy month cannot run up a phone bill. The
+**Settings → Relays**. Treat the limit as a monitoring control, not a guaranteed cap on
+your carrier's bill: network usage includes both download and upload traffic, plus
+overhead. Check Android's usage statistics or your carrier's report. The
 [bandwidth guide](#bandwidth-depends-on-how-many-pages-you-check) applies to phones too.
+
+**Optional experimental Assistant mode (v0.1.9 or later).** You can manually reconnect
+mobile data without rooting a supported phone. Ordinary relaying does not need Assistant
+mode. Selecting Relay as your digital assistant replaces your current assistant.
+
+1. Tap **Set up Assistant mode** and select PageCrawl Relay as Android's digital assistant.
+   This replaces your current assistant. You can change it back through **Assistant settings**.
+2. Turn Wi-Fi off and confirm the phone has working mobile data. If **Relay checks** is
+   enabled, also enable **Also use mobile data**.
+3. Set **Airplane mode pause (seconds)** to a value from 1 to 120. The default is 10 seconds.
+4. Tap **Reconnect mobile data** and confirm. The app turns airplane mode on, waits for
+   the chosen pause, turns it off and waits for cellular internet to return.
+5. Inspect the public IPv4 comparison and wait for **Relaying checks** before using the
+   phone for another monitor check.
+
+The cycle temporarily disconnects the phone and can interrupt checks and calls. Checks
+follow your PageCrawl offline policy while the relay is unavailable. The control does not
+wait for active checks to finish. Choose a waiting policy if those checks must keep the
+cellular route, and reconnect between checks.
+
+**Known limitation:** an interrupted check using a waiting policy can remain postponed
+for up to 24 hours after the phone reconnects. Verify that scheduled monitoring resumes
+after testing a reconnect. Backend coordination of planned reconnects is not implemented.
+
+Assistant support varies by Android version and device; the app reports when this mode is
+unsupported or not ready. A reconnect does not guarantee a different address. The app
+uses HTTPS requests to ipify over the phone's cellular connection to compare public IPv4
+before and after, and reports when the address is unchanged or could not be verified.
+It does not measure IPv6. The pause is adjustable, but no duration guarantees a new IP.
+
+Use **Cancel reconnect** to stop a cycle. If the app reports that recovery is needed,
+use **Turn airplane mode off** or **Open airplane mode settings** and restore connectivity
+before continuing. The native control is manual; it does not schedule reconnects.
+
+Keep the phone unlocked when starting a reconnect. If Android stops Relay during a cycle,
+check airplane mode in Settings; recovery resumes when Relay opens or its selected
+assistant service restarts. If you changed assistants during the cycle, select Relay again
+to complete its pending recovery check before starting another reconnect.
 
 **Battery.** While relaying, the app keeps the phone and its Wi-Fi awake, because a
 sleeping phone stops answering the gateway and checks fail while the phone looks

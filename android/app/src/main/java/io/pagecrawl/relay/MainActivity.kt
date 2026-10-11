@@ -67,12 +67,18 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AssistantReconnect.initialize(this)
         enableEdgeToEdge()
         setContent {
             RelayTheme {
                 RelayApp()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AssistantReconnect.initialize(this)
     }
 }
 
@@ -161,6 +167,7 @@ private fun RelayApp() {
                     },
                 )
             }
+            AssistantModeCard()
         }
     }
 }

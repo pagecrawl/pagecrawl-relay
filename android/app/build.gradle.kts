@@ -30,6 +30,12 @@ android {
         targetSdk = 36
         versionCode = relayVersionCode
         versionName = relayVersion
+
+        // The Go relay library is built only for these ABIs. Other dependencies include
+        // 32-bit libraries, which must not make Play offer an app without the relay library.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     signingConfigs {

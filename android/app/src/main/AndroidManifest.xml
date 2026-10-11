@@ -19,6 +19,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <queries>
+        <intent>
+            <action android:name="android.settings.VOICE_CONTROL_AIRPLANE_MODE" />
+            <category android:name="android.intent.category.VOICE" />
+        </intent>
+    </queries>
+
     <!-- No backup: the relay key is a credential and must not leave this phone in a backup.
          It is encrypted with a Keystore key that does not travel anyway (see KeyVault). -->
     <application
@@ -48,6 +55,41 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Carries the network traffic of the user's own PageCrawl website checks while they have switched the relay on." />
         </service>
+
+        <!-- Optional assistant role. No microphone access, root, or private radio API. -->
+        <service
+            android:name=".RelayVoiceInteractionService"
+            android:exported="true"
+            android:directBootAware="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/relay_voice_interaction" />
+        </service>
+        <service
+            android:name=".RelayVoiceInteractionSessionService"
+            android:exported="true"
+            android:directBootAware="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service
+            android:name=".RelayRecognitionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SPEECH_RECOGNITION">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name=".AssistantRecoveryReceiver"
+            android:exported="false"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".BootReceiver"

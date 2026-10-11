@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.1.9
+
+- **Optional experimental Assistant mode for Android.** Select Relay as the phone's
+  digital assistant to manually reconnect mobile data without root on supported devices.
+  The airplane mode pause is adjustable from 1 to 120 seconds, with a 10-second default.
+  Ordinary relaying does not require the assistant role, and device support varies.
+- Compare public IPv4 through the cellular connection before and after a reconnect.
+  The carrier may retain the same address; IPv6 is not measured. The comparison uses
+  HTTPS requests to ipify.
+- Cancel a reconnect and recover an interrupted cycle, with saved recovery information
+  and controls to turn airplane mode off or open Android settings.
+- Restrict Android downloads to the supported 64-bit architectures and align the native
+  library for devices using 16 KiB memory pages.
+
+Reconnects can interrupt checks and calls. The control is manual, does not schedule
+reconnects and does not wait for active checks to finish. PageCrawl follows the configured
+offline policy while the relay is unavailable.
+
+**Known limitation:** an interrupted check using a waiting policy can remain postponed
+for up to 24 hours after the phone reconnects. Reconnect between checks and verify that
+scheduled monitoring resumes. Backend coordination of planned reconnects is not implemented.
+
 ## v0.1.7
 
 - **PageCrawl Relay for Mac.** A menu-bar app, released as `pagecrawl-relay-macos.dmg`:
