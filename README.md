@@ -332,8 +332,14 @@ background, which is the whole of what a relay does.
 
 **Install.** Download `pagecrawl-relay-android.apk` from the
 [latest release](https://github.com/pagecrawl/pagecrawl-relay/releases/latest) and open it
-on the phone. Android asks you to allow installs from that source the first time. The app
-is not in Google Play. Every release APK is signed with the same key and carries a build
+on the phone. Android asks you to allow installs from that source the first time.
+
+**Google Play status.** PageCrawl Relay is not yet published on Google Play. Google has
+[specific policies for network relaying and background services](https://support.google.com/googleplay/android-developer/answer/16559646?hl=en),
+so approval is uncertain. Use the official APK for now and download newer official APKs
+to update. You can use Relay without waiting for a Play release.
+
+Every release APK is signed with the same key and carries a build
 provenance attestation, like the desktop binaries:
 
 ```bash
