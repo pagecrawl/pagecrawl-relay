@@ -1,23 +1,64 @@
 # PageCrawl Relay client
 
-A small program you run on a computer, or an Android phone, you own. Your PageCrawl
-checks then leave from **your** connection instead of ours, which is what you want for pages only
-your public IP can reach: a public portal that allows your office IP, or a
-site that only serves your country. Private intranets and LAN addresses are refused.
+A small program you run on a computer, or an Android phone, you own. Selected
+PageCrawl checks use **your** internet connection, while PageCrawl handles the
+monitoring schedule, captures, comparisons and alerts. Private intranets and LAN
+addresses are refused.
 
 It is not a general-purpose proxy. The gateway authorizes checks for your team,
 and the client independently validates each destination. HTTPS page content stays
 encrypted between PageCrawl and the site. Plain HTTP content is unencrypted and
 visible to the relay machine; hostnames and ports are visible for both.
 
-**Available on every plan, including Free.** Some sites answer a datacenter address
-with a 403, a CAPTCHA, or a stripped-down page, while serving a normal one to an
-ordinary home or office connection. If a page works in your browser but not in
-PageCrawl, this is the thing to try. It costs nothing beyond your own bandwidth.
+**Available on every plan, including Free, with no PageCrawl Relay fee.** You supply
+the device, electricity and bandwidth, and keep it online when checks need it.
+Your plan's normal page and check limits still apply.
 
 Open source and small enough to read: see [Why this is open source](#why-this-is-open-source).
 Security reporting is in [SECURITY.md](SECURITY.md).
 See [the changelog](CHANGELOG.md) for release changes.
+
+---
+
+## When is Relay useful?
+
+Use an available managed **Location** when it already captures the data you need.
+Relay mainly suits personal monitoring on a budget, or a source that specifically
+requires your own connection. Needing another country's page version alone does
+not require Relay: select an available location for that country.
+
+### Personal price or stock monitoring on a spare device
+
+You track a few product prices, stock levels or public used-item searches, but the
+default connection does not capture the expected page. You already have a spare
+Android phone in a cupboard, a home server or a computer that stays online. If a
+PageCrawl check through that device captures the expected data, Relay lets you
+reuse the hardware and bandwidth you already have.
+
+For example, leave a supported old Android phone on a charger and home Wi-Fi,
+enroll it, and select its name as the monitor's **Location**. Inspect a test capture
+before assigning more monitors. Relay has no additional fee, but you still supply
+power and bandwidth, and normal monitoring limits apply. It does not guarantee
+that every site will load.
+
+### A public source that allows your exact IP
+
+This is a niche case: you have authorized access to a public-facing catalogue or
+research feed whose allowlist includes your home or office public IP. A managed
+location in the same country supplies another address, so it does not meet that
+access rule.
+
+Run Relay on the approved connection and select that machine by name as the
+monitor's **Location**. Choose a waiting offline policy if checks must retain that
+connection. Configure any required website login in PageCrawl; Relay does not
+import your browser's signed-in session. Private intranets, local router pages and
+other LAN destinations remain blocked.
+
+For business monitoring, [Enterprise or Ultimate](https://pagecrawl.io/pricing)
+and their included managed connection options are usually simpler than
+maintaining your own device. Relay remains available on every plan when you need
+your own connection. See the [connection guide](https://pagecrawl.io/help/features/article/residential-proxies)
+for the available options.
 
 ---
 
@@ -528,25 +569,22 @@ The arithmetic is `monitors x checks per month x page size x 2`. The settings pa
 restarts. Your internet connection carries both network legs, so its total usage
 is roughly twice that counter, plus protocol overhead.
 
-### What the same traffic would cost as paid bandwidth
+### How do Relay and managed connection costs compare?
 
-This is the number that makes a relay worth running. PageCrawl also sells metered
-residential bandwidth at $10 per gigabyte on the Ultimate and Enterprise plans, and
-the same pages carried that way are billed by the gigabyte:
+Relay has no PageCrawl fee. Its cost to you is the device, electricity and internet
+usage, including both download and upload traffic. Reusing hardware and bandwidth
+you already have can make sense for a small personal monitoring setup.
 
-| Monitors, checked hourly | Through this machine | As paid residential bandwidth |
-|---|---|---|
-| 1 | your own connection | about $14/month |
-| 5 | your own connection | about $72/month |
-| 20 | your own connection | about $288/month |
+Enterprise and Ultimate include managed connection options at no extra cost.
+These included options do not consume optional **Web Unblocker** bandwidth, which
+is billed separately at $10/GB. Compare your own running costs with the connection
+option you would actually use, rather than assuming every managed check incurs a
+bandwidth charge.
 
-To price your own pages rather than this example, use the calculator at
-[pagecrawl.io/residential-proxies](https://pagecrawl.io/residential-proxies#cost-calculator);
-it takes your page size, check frequency and number of monitors.
-
-Metered bandwidth still wins when you need a page checked from a country you are not
-in, or you would rather your own address stayed out of it. A relay wins when the page
-simply needs to see an ordinary connection and you already have a machine that is on.
+See the [connection guide](https://pagecrawl.io/help/features/article/residential-proxies)
+for the distinction and the [bandwidth calculator](https://pagecrawl.io/residential-proxies#cost-calculator)
+to estimate optional Web Unblocker usage. Normal page and check limits apply to
+Relay and managed connections alike.
 
 Watch the upload side in particular. Home connections often have a tenth of the
 download speed on upload, and a page that takes seconds to fetch can take longer to
