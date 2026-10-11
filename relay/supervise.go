@@ -35,7 +35,6 @@ func Supervise(ctx context.Context, client *Client) {
 
 		conn, err := dialContext(session, cfg)
 		if err == nil && client.attach(session, conn) {
-			conn.state = client.state
 			startedAt := time.Now()
 			log.Printf("Connected to %s as %s.", cfg.GatewayURL, cfg.Platform)
 			err = conn.Run()

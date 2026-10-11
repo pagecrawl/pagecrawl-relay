@@ -115,6 +115,9 @@ func (t *tunnel) writeGateway() {
 }
 
 func (t *tunnel) addBytes(n int) {
+	if n <= 0 {
+		return
+	}
 	t.bytesMu.Lock()
 	t.bytes += int64(n)
 	t.bytesMu.Unlock()
@@ -146,6 +149,9 @@ func (t *tunnel) reserveStream(id uint32) *stream {
 	ctx, cancel := context.WithCancel(t.ctx)
 	s := &stream{id: id, ctx: ctx, cancel: cancel, writes: make(chan []byte, maxQueueMessages)}
 	t.streams[id] = s
+	if t.state != nil {
+		t.state.streamStarted()
+	}
 	return s
 }
 
@@ -157,6 +163,9 @@ func (t *tunnel) dropStream(id uint32, expected *stream) bool {
 		return false
 	}
 	delete(t.streams, id)
+	if t.state != nil {
+		t.state.streamFinished()
+	}
 	t.queued -= s.queued
 	s.cancel()
 	if s.conn != nil {
@@ -179,6 +188,9 @@ func (t *tunnel) Close() {
 				_ = s.conn.Close()
 			}
 			delete(t.streams, id)
+			if t.state != nil {
+				t.state.streamFinished()
+			}
 		}
 		t.queued = 0
 	})

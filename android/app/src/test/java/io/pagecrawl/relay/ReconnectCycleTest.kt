@@ -24,6 +24,8 @@ class ReconnectCycleTest {
         var unsettledOn = false
         var enableWhileWaiting = false
         var enableDuringFinalProbe = false
+        var activity: (() -> RelayActivity?)? = null
+        var duringPause: (() -> Unit)? = null
         var holdWhileOn: CompletableDeferred<Unit>? = null
         var holdRestore: CompletableDeferred<Unit>? = null
         val enabled = CompletableDeferred<Unit>()
@@ -32,6 +34,7 @@ class ReconnectCycleTest {
         val commands = mutableListOf<Boolean>()
         val timeline = mutableListOf<String>()
         override fun startError() = error
+        override fun relayActivity(): RelayActivity? = if (activity == null) RelayActivity(0, 0) else activity!!.invoke()
         override fun airplaneOn(): Boolean {
             if (unknownRadio) error("Could not read airplane mode.")
             return on
@@ -63,10 +66,96 @@ class ReconnectCycleTest {
         }
         override suspend fun pause(milliseconds: Long) {
             clock += milliseconds
+            duringPause?.invoke()
             if (on) holdWhileOn?.await()
             if (on && cancelDuringPause) { cancelDuringPause = false; throw CancellationException() }
         }
         override fun now() = clock
+    }
+
+    @Test fun waitsForActiveConnectionsThenTheFullIdleWindowBeforeChangingRadio() = runBlocking {
+        val env = Environment()
+        env.activity = { RelayActivity(if (env.clock < 5_000) 1 else 0, 2) }
+        var enabledAt = 0L
+        val states = mutableListOf<ReconnectState>()
+        ReconnectCycle(env) {
+            states += it
+            if (it.phase == ReconnectPhase.ENABLING) enabledAt = env.clock
+        }.run(1, 5)
+        assertEquals(10_000L, enabledAt)
+        assertTrue(states.any { it.phase == ReconnectPhase.WAITING_FOR_IDLE && it.busy })
+        assertEquals(listOf(true, false), env.commands)
+    }
+
+    @Test fun shortActivityBetweenPollsRestartsTheEntireIdleWindow() = runBlocking {
+        val env = Environment()
+        env.activity = { RelayActivity(0, if (env.clock < 3_000) 0 else 2) }
+        var enabledAt = 0L
+        ReconnectCycle(env) { if (it.phase == ReconnectPhase.ENABLING) enabledAt = env.clock }.run(1, 5)
+        assertEquals(8_000L, enabledAt)
+    }
+
+    @Test fun canCancelWhileWaitingWithoutChangingRadioOrSavingRecovery() = runBlocking {
+        val env = Environment()
+        env.duringPause = { if (env.commands.isEmpty()) throw CancellationException() }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 30)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertEquals("Reconnect canceled.", state.message)
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun refusesReconnectIfActivityCannotBecomeIdleWithinTenMinutes() = runBlocking {
+        val env = Environment().apply { activity = { RelayActivity(1, 1) } }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 30)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("10 minutes"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun missingActivityInformationNeverStartsRadioChanges() = runBlocking {
+        val env = Environment().apply { activity = { null } }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 30)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun refusesIdleValuesOutsideTheSupportedRange() = runBlocking {
+        for (seconds in listOf(4, 301)) {
+            val env = Environment()
+            var state = ReconnectState()
+            ReconnectCycle(env) { state = it }.run(1, seconds)
+            assertEquals(ReconnectPhase.ERROR, state.phase)
+            assertTrue(env.commands.isEmpty())
+            assertFalse(env.marker)
+        }
+    }
+
+    @Test fun ongoingShortActivityNeverGetsMistakenForAnIdlePhone() = runBlocking {
+        val env = Environment()
+        env.activity = { RelayActivity(0, env.clock / 1_000) }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 5)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertTrue(state.message.contains("10 minutes"))
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
+    }
+
+    @Test fun abortsBeforeRadioChangesIfTheNetworkChangesWhileWaiting() = runBlocking {
+        val env = Environment()
+        env.duringPause = { env.error = "Wi-Fi is active." }
+        var state = ReconnectState()
+        ReconnectCycle(env) { state = it }.run(1, 30)
+        assertEquals(ReconnectPhase.ERROR, state.phase)
+        assertEquals("Wi-Fi is active.", state.message)
+        assertTrue(env.commands.isEmpty())
+        assertFalse(env.marker)
     }
 
     @Test fun verifiesBothAddressesAndPersistsBeforeChangingRadio() = runBlocking {

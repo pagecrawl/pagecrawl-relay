@@ -146,6 +146,7 @@ func TestSettingsChangesCancelSessionAndCloseSockets(t *testing.T) {
 
 func TestPendingOpenIsCancelledBeforeDNSCompletes(t *testing.T) {
 	tun, _ := tunnelPair(t)
+	tun.state = NewState()
 	started := make(chan struct{}, 1)
 	oldResolver := net.DefaultResolver
 	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -159,6 +160,7 @@ func TestPendingOpenIsCancelledBeforeDNSCompletes(t *testing.T) {
 	defer func() { net.DefaultResolver = oldResolver }()
 	tun.dispatch(frame{op: opOpen, streamID: 1, payload: []byte(`{"host":"pending.example","port":443}`)})
 	await(t, started)
+	assertActivity(t, tun.state, 1, 1)
 	tun.dispatch(frame{op: opClose, streamID: 1})
 	done := make(chan struct{})
 	go func() { tun.workers.Wait(); close(done) }()
@@ -166,6 +168,7 @@ func TestPendingOpenIsCancelledBeforeDNSCompletes(t *testing.T) {
 	if len(tun.streams) != 0 || len(tun.openSlots) != 0 {
 		t.Fatal("pending open leaked its stream slot")
 	}
+	assertActivity(t, tun.state, 0, 2)
 }
 
 func TestStreamReservationsStayBoundedAfterClose(t *testing.T) {

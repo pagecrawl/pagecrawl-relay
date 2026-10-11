@@ -106,14 +106,14 @@ object AssistantReconnect {
     }
 
     @MainThread
-    fun start(context: Context, pauseSeconds: Int = 10): Boolean {
+    fun start(context: Context, pauseSeconds: Int = 10, idleSeconds: Int = 30): Boolean {
         if (job?.isCompleted == false) return false
         if (restoreNeeded(context)) {
             initialize(context)
             return false
         }
         app = context.applicationContext
-        begin(context) { it.run(pauseSeconds) }
+        begin(context) { it.run(pauseSeconds, idleSeconds) }
         return true
     }
 
@@ -201,7 +201,7 @@ object AssistantReconnect {
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PageCrawlRelay:assistant-reconnect")
                 .apply { setReferenceCounted(false) }
             try {
-                wake.acquire(300_000)
+                wake.acquire(900_000)
                 operation(cycle)
             } finally {
                 if (wake.isHeld) wake.release()
@@ -241,6 +241,17 @@ object AssistantReconnect {
 
         override fun airplaneOn() = airplaneOn(context)
         override fun cellularAvailable() = cellular(context) != null
+        override fun relayActivity(): RelayActivity? {
+            val status = RelayMonitor.currentStatus()
+            if (status == null) {
+                return if (!RelaySettings(context).enabled && !RelayMonitor.state.value.running && RelayMonitor.statusReader == null) {
+                    RelayActivity(0, 0)
+                } else null
+            }
+            val active = status.activeConnections ?: return null
+            val revision = status.activityRevision ?: return null
+            return RelayActivity(active, revision)
+        }
         override fun recoveryReason(): String {
             val availability = support(context)
             return when {

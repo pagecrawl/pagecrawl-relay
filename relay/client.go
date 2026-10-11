@@ -97,6 +97,9 @@ func (c *Client) attach(ctx context.Context, t *tunnel) bool {
 		t.Close()
 		return false
 	}
+	// Attach status before exposing the tunnel to settings operations which can
+	// close it. Stream accounting must never race a late state assignment.
+	t.state = c.state
 	c.tunnel = t
 	c.state.MarkConnected("")
 	return true

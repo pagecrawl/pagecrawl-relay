@@ -17,11 +17,15 @@ type State struct {
 
 	// Cumulative for the life of the process, so a reconnect does not reset the
 	// number someone is watching.
-	bytes    int64
-	checks   int
-	exitIP   string
-	lastErr  string
-	lastHost string
+	bytes  int64
+	checks int
+	// Pending DNS/dials count as active work too. The revision records short
+	// streams and traffic which could begin and end between status snapshots.
+	activeConnections int
+	activityRevision  int64
+	exitIP            string
+	lastErr           string
+	lastHost          string
 	// The gateway turned this relay's token away. Worth its own flag rather than only the
 	// error text: a revoked key never recovers by retrying, so a front end should tell the
 	// person to enrol again instead of showing an endless "retrying".
@@ -83,8 +87,28 @@ func (s *State) MarkDisconnected(err error) {
 }
 
 func (s *State) AddBytes(n int64) {
+	if n <= 0 {
+		return
+	}
 	s.mu.Lock()
 	s.bytes += n
+	s.activityRevision++
+	s.mu.Unlock()
+}
+
+// Stream lifecycle updates are called while the tunnel's streams lock is held.
+// State never acquires a tunnel lock, so this lock order cannot be reversed.
+func (s *State) streamStarted() {
+	s.mu.Lock()
+	s.activeConnections++
+	s.activityRevision++
+	s.mu.Unlock()
+}
+
+func (s *State) streamFinished() {
+	s.mu.Lock()
+	s.activeConnections--
+	s.activityRevision++
 	s.mu.Unlock()
 }
 
@@ -128,18 +152,20 @@ func (s *State) Paused() bool {
 // Snapshot is what every display reads. Returned by value so a caller can render
 // it without holding the lock.
 type Snapshot struct {
-	Connected    bool    `json:"connected"`
-	Paused       bool    `json:"paused"`
-	Uptime       string  `json:"uptime"`
-	ConnectedFor string  `json:"connected_for"`
-	Bytes        int64   `json:"bytes"`
-	Traffic      string  `json:"traffic"`
-	Connections  int     `json:"connections"`
-	ExitIP       string  `json:"exit_ip"`
-	LastHost     string  `json:"last_host"`
-	LastError    string  `json:"last_error"`
-	Rejected     bool    `json:"rejected"`
-	Recent       []Event `json:"recent"`
+	Connected         bool    `json:"connected"`
+	Paused            bool    `json:"paused"`
+	Uptime            string  `json:"uptime"`
+	ConnectedFor      string  `json:"connected_for"`
+	Bytes             int64   `json:"bytes"`
+	Traffic           string  `json:"traffic"`
+	Connections       int     `json:"connections"`
+	ActiveConnections int     `json:"active_connections"`
+	ActivityRevision  int64   `json:"activity_revision"`
+	ExitIP            string  `json:"exit_ip"`
+	LastHost          string  `json:"last_host"`
+	LastError         string  `json:"last_error"`
+	Rejected          bool    `json:"rejected"`
+	Recent            []Event `json:"recent"`
 }
 
 func (s *State) Snapshot() Snapshot {
@@ -147,16 +173,18 @@ func (s *State) Snapshot() Snapshot {
 	defer s.mu.Unlock()
 
 	snap := Snapshot{
-		Connected:   s.connected,
-		Paused:      s.paused,
-		Uptime:      humanDuration(time.Since(s.startedAt)),
-		Bytes:       s.bytes,
-		Traffic:     humanBytes(s.bytes),
-		Connections: s.checks,
-		ExitIP:      s.exitIP,
-		LastHost:    s.lastHost,
-		LastError:   s.lastErr,
-		Rejected:    s.rejected,
+		Connected:         s.connected,
+		Paused:            s.paused,
+		Uptime:            humanDuration(time.Since(s.startedAt)),
+		Bytes:             s.bytes,
+		Traffic:           humanBytes(s.bytes),
+		Connections:       s.checks,
+		ActiveConnections: s.activeConnections,
+		ActivityRevision:  s.activityRevision,
+		ExitIP:            s.exitIP,
+		LastHost:          s.lastHost,
+		LastError:         s.lastErr,
+		Rejected:          s.rejected,
 	}
 
 	// Copied, and newest first: the caller renders this without the lock, and the

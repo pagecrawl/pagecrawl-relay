@@ -2,10 +2,31 @@ package io.pagecrawl.relay
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayStatusTest {
+    @Test fun readsOnlyValidIntegralActivityCounters() {
+        val status = RelayStatus.fromJson("""{"active_connections":2,"activity_revision":9000000000}""")
+        assertEquals(2, status.activeConnections)
+        assertEquals(9000000000L, status.activityRevision)
+        val zero = RelayStatus.fromJson("""{"active_connections":0,"activity_revision":0}""")
+        assertEquals(0, zero.activeConnections)
+        assertEquals(0L, zero.activityRevision)
+    }
+
+    @Test fun missingMalformedAndOverflowCountersCannotReportIdle() {
+        assertNull(RelayStatus.fromJson("{}").activeConnections)
+        assertNull(RelayStatus.fromJson("{}").activityRevision)
+        for (value in listOf("null", "\"0\"", "0.5", "-1", "true", "9223372036854775808")) {
+            val status = RelayStatus.fromJson("""{"active_connections":$value,"activity_revision":$value}""")
+            assertNull("active counter $value", status.activeConnections)
+            assertNull("revision $value", status.activityRevision)
+        }
+        assertNull(RelayStatus.fromJson("""{"active_connections":2147483648}""").activeConnections)
+    }
+
     // The shape relay.Snapshot marshals to (relay/state.go).
     private val snapshot = """
         {"connected":true,"paused":false,"uptime":"3m","connected_for":"2m","bytes":2048,

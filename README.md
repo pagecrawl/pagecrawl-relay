@@ -357,19 +357,27 @@ overhead. Check Android's usage statistics or your carrier's report. The
 mobile data without rooting a supported phone. Ordinary relaying does not need Assistant
 mode. Selecting Relay as your digital assistant replaces your current assistant.
 
+Reconnects start only when you tap the button. There is no periodic or random schedule.
+In v0.1.11 or later, **Wait for idle (seconds)** requires 5 to 300 seconds without active
+Relay connections or traffic before starting, with a 30-second default. New activity
+restarts the wait. This is separate from **Airplane mode pause (seconds)**, which sets
+how long mobile data stays disconnected. The idle wait does not check other apps or calls,
+and new checks can still start after the idle window.
+
 1. Tap **Set up Assistant mode** and select PageCrawl Relay as Android's digital assistant.
    This replaces your current assistant. You can change it back through **Assistant settings**.
 2. Turn Wi-Fi off and confirm the phone has working mobile data. If **Relay checks** is
    enabled, also enable **Also use mobile data**.
-3. Set **Airplane mode pause (seconds)** to a value from 1 to 120. The default is 10 seconds.
-4. Tap **Reconnect mobile data** and confirm. The app turns airplane mode on, waits for
+3. Set **Wait for idle (seconds)** and **Airplane mode pause (seconds)**. The defaults
+   are 30 idle seconds and a 10-second pause with airplane mode on.
+4. Tap **Reconnect mobile data** and confirm. After the idle wait, the app turns airplane mode on, waits for
    the chosen pause, turns it off and waits for cellular internet to return.
 5. Inspect the public IPv4 comparison and wait for **Relaying checks** before using the
    phone for another monitor check.
 
 The cycle temporarily disconnects the phone and can interrupt checks and calls. Checks
-follow your PageCrawl offline policy while the relay is unavailable. The control does not
-wait for active checks to finish. Choose a waiting policy if those checks must keep the
+follow your PageCrawl offline policy while the relay is unavailable. The idle wait measures
+Relay connections and traffic, and does not prevent a new check from starting. Choose a waiting policy if those checks must keep the
 cellular route, and reconnect between checks.
 
 **Known limitation:** an interrupted check using a waiting policy can remain postponed

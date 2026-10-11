@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.1.11
+
+- Android's manual **Reconnect mobile data** control now waits for Relay to stay idle
+  before switching airplane mode on. Choose an idle window from 5 to 300 seconds;
+  the default is 30 seconds. Active connections, pending connections and new relay
+  traffic restart the window, including short connections between status updates.
+- The screen distinguishes the idle window from the airplane mode pause. Reconnects
+  happen only when you tap the button, with no periodic or random schedule.
+- Cancel while waiting without interrupting mobile data. If Relay does not stay idle
+  within 10 minutes, the operation stops without changing airplane mode.
+
+The idle wait measures Relay activity, not other apps or phone calls. It reduces the
+chance of interrupting a check, but does not reserve an idle window against new checks.
+Your carrier may retain the same public IP after reconnecting.
+
+**Known limitation:** an interrupted check using a waiting policy can remain postponed
+for up to 24 hours after the phone reconnects. This requires a PageCrawl backend recovery
+update, independently of the Android app. Verify that scheduled monitoring resumes.
+
 ## v0.1.10
 
 - **Optional experimental Assistant mode for Android.** Select Relay as the phone's

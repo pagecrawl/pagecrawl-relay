@@ -8,6 +8,8 @@ data class RelayStatus(
     val connected: Boolean = false,
     val traffic: String = "0 B",
     val connections: Int = 0,
+    val activeConnections: Int? = null,
+    val activityRevision: Long? = null,
     val connectedFor: String = "",
     val lastError: String = "",
     /** PageCrawl refused the key. Retrying cannot fix that; a new key can. */
@@ -31,11 +33,19 @@ data class RelayStatus(
                 connected = obj.optBoolean("connected"),
                 traffic = obj.optString("traffic", "0 B"),
                 connections = obj.optInt("connections"),
+                activeConnections = nonnegativeInteger(obj, "active_connections")?.takeIf { it <= Int.MAX_VALUE }?.toInt(),
+                activityRevision = nonnegativeInteger(obj, "activity_revision"),
                 connectedFor = obj.optString("connected_for"),
                 lastError = obj.optString("last_error"),
                 rejected = obj.optBoolean("rejected"),
                 recent = destinations(obj.optJSONArray("recent")),
             )
+        }
+
+        private fun nonnegativeInteger(obj: JSONObject, key: String): Long? = when (val value = obj.opt(key)) {
+            is Int -> value.toLong().takeIf { it >= 0 }
+            is Long -> value.takeIf { it >= 0 }
+            else -> null
         }
 
         private fun destinations(array: JSONArray?): List<Destination> {

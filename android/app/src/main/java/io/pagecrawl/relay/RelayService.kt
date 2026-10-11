@@ -38,6 +38,10 @@ data class ServiceState(
 object RelayMonitor {
     private val mutable = MutableStateFlow(ServiceState())
     val state: StateFlow<ServiceState> = mutable.asStateFlow()
+    internal var statusReader: (() -> RelayStatus?)? = null
+
+    /** The idle guard reads fresh counters instead of the screen's five-second refresh. */
+    internal fun currentStatus(): RelayStatus? = runCatching { statusReader?.invoke() }.getOrNull()
 
     internal fun update(state: ServiceState) {
         mutable.value = state
@@ -104,6 +108,7 @@ class RelayService : Service() {
         super.onCreate()
         connectivity = getSystemService(ConnectivityManager::class.java)
         settings = RelaySettings(this)
+        RelayMonitor.statusReader = { relay?.statusJSON()?.let(RelayStatus::fromJson) }
         createChannel()
     }
 
@@ -145,8 +150,15 @@ class RelayService : Service() {
 
         val stopping = relay
         relay = null
+        // Keep fresh shutdown counters available until Go has actually stopped.
+        val stoppingReader: () -> RelayStatus? = { stopping?.statusJSON()?.let(RelayStatus::fromJson) }
+        RelayMonitor.statusReader = stoppingReader
         worker.execute {
             runCatching { stopping?.stop() }
+            main.post {
+                // A newer service may already own the snapshot source.
+                if (RelayMonitor.statusReader === stoppingReader) RelayMonitor.statusReader = null
+            }
         }
         worker.shutdown()
         releaseLocks()

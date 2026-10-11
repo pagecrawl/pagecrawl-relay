@@ -5,24 +5,26 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 enum class ReconnectPhase {
-    IDLE, CHECKING_IP, ENABLING, PAUSING, DISABLING, WAITING_FOR_NETWORK,
+    IDLE, CHECKING_IP, WAITING_FOR_IDLE, ENABLING, PAUSING, DISABLING, WAITING_FOR_NETWORK,
     VERIFYING_IP, COMPLETE, ERROR, RECOVERY_REQUIRED,
 }
 
 data class ReconnectState(
     val phase: ReconnectPhase = ReconnectPhase.IDLE,
-    val message: String = "Reconnect mobile data through Android's selected assistant.",
+    val message: String = "Reconnects start only when you tap Reconnect mobile data. There is no automatic schedule.",
     val secondsRemaining: Int = 0,
     val beforeIp: String? = null,
     val afterIp: String? = null,
     val ipChanged: Boolean? = null,
 ) {
     val busy: Boolean get() = phase in setOf(
-        ReconnectPhase.CHECKING_IP, ReconnectPhase.ENABLING, ReconnectPhase.PAUSING,
+        ReconnectPhase.CHECKING_IP, ReconnectPhase.WAITING_FOR_IDLE, ReconnectPhase.ENABLING, ReconnectPhase.PAUSING,
         ReconnectPhase.DISABLING, ReconnectPhase.WAITING_FOR_NETWORK, ReconnectPhase.VERIFYING_IP,
     )
     val recoveryRequired: Boolean get() = phase == ReconnectPhase.RECOVERY_REQUIRED
 }
+
+internal data class RelayActivity(val activeConnections: Int, val revision: Long)
 
 /** The radio operation is independent of Android's service lifecycle, so failure paths can be tested. */
 internal interface ReconnectEnvironment {
@@ -31,6 +33,7 @@ internal interface ReconnectEnvironment {
     fun cellularAvailable(): Boolean
     fun markRestoreNeeded(needed: Boolean): Boolean
     fun recoveryReason(): String = "Retry recovery with Relay selected as your assistant."
+    fun relayActivity(): RelayActivity?
     suspend fun command(enabled: Boolean)
     suspend fun probeIp(): String?
     suspend fun pause(milliseconds: Long)
@@ -43,11 +46,12 @@ internal class ReconnectCycle(
 ) {
     private var state = ReconnectState()
 
-    suspend fun run(pauseSeconds: Int) {
+    suspend fun run(pauseSeconds: Int, idleSeconds: Int = 30) {
         var restoreNeeded = false
         var problem: String? = null
         try {
             require(pauseSeconds in 1..120) { "Choose a pause between 1 and 120 seconds." }
+            require(idleSeconds in 5..300) { "Choose an idle wait between 5 and 300 seconds." }
             check(!environment.airplaneOn()) { "Airplane mode is already on. Turn it off before reconnecting." }
             environment.startError()?.let { error(it) }
             update(ReconnectPhase.CHECKING_IP, "Checking the current public IPv4 address.")
@@ -55,6 +59,7 @@ internal class ReconnectCycle(
                 "Could not check the public IPv4 address. Mobile data has not been interrupted.",
             )
             state = state.copy(beforeIp = before)
+            waitForIdle(idleSeconds)
             // A network or assistant selection can change while the probe is running.
             environment.startError()?.let { error(it) }
             check(!environment.airplaneOn()) { "Airplane mode was turned on before the reconnect started." }
@@ -113,6 +118,31 @@ internal class ReconnectCycle(
             update(ReconnectPhase.ERROR, message)
         } catch (failure: Exception) {
             update(ReconnectPhase.ERROR, failure.message ?: "Could not verify the mobile connection.")
+        }
+    }
+
+    private suspend fun waitForIdle(seconds: Int) {
+        val deadline = environment.now() + 600_000
+        val window = IdleWindow(seconds * 1_000L)
+        while (true) {
+            environment.startError()?.let { error(it) }
+            check(!environment.airplaneOn()) { "Airplane mode was turned on before the reconnect started." }
+            check(environment.now() < deadline) {
+                "Relay did not stay idle within 10 minutes. Mobile data has not been interrupted. Try again later."
+            }
+            val activity = environment.relayActivity()
+            val remaining = window.remaining(environment.now(), activity)
+            if (remaining == 0L) return
+            update(
+                ReconnectPhase.WAITING_FOR_IDLE,
+                when {
+                    activity == null -> "Waiting for Relay activity information. Mobile data has not been interrupted."
+                    activity.activeConnections > 0 -> "Waiting for active Relay connections to finish. New activity restarts the idle wait."
+                    else -> "Waiting for Relay to stay idle. New activity restarts the idle wait."
+                },
+                ((remaining + 999) / 1_000).toInt(),
+            )
+            environment.pause(1_000)
         }
     }
 

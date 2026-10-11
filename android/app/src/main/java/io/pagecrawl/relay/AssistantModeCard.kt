@@ -2,7 +2,9 @@ package io.pagecrawl.relay
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +12,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -21,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,8 +54,22 @@ internal fun AssistantModeCard() {
         mutableStateOf(preferences.getInt("pause_seconds", 10).coerceIn(1, 120).toString())
     }
     var confirmReconnect by remember { mutableStateOf(false) }
+    var idleText by remember {
+        mutableStateOf(preferences.getInt("idle_seconds", 30).coerceIn(5, 300).toString())
+    }
     var setupProblem by remember { mutableStateOf<String?>(null) }
     val pauseSeconds = pauseText.toIntOrNull()?.takeIf { it in 1..120 }
+    val idleSeconds = idleText.toIntOrNull()?.takeIf { it in 5..300 }
+
+    val keepScreenOn = state.busy
+    DisposableEffect(context, keepScreenOn) {
+        val window = (context as? Activity)?.window
+        val alreadyKeptOn = window?.attributes?.flags?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+        if (keepScreenOn) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            if (keepScreenOn && !alreadyKeptOn) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     val setup = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         AssistantReconnect.initialize(context)
@@ -80,6 +99,10 @@ internal fun AssistantModeCard() {
                     "as this phone's digital assistant replaces your current assistant.",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Text(
+                "Reconnects start only when you tap the button. There is no periodic or random schedule.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
 
             if (!support.supported) {
                 Text(support.reason, style = MaterialTheme.typography.bodyMedium)
@@ -105,6 +128,22 @@ internal fun AssistantModeCard() {
 
                 if (support.selected) {
                     OutlinedTextField(
+                        value = idleText,
+                        onValueChange = { value ->
+                            idleText = value.filter(Char::isDigit).take(3)
+                            idleText.toIntOrNull()?.takeIf { it in 5..300 }?.let {
+                                preferences.edit().putInt("idle_seconds", it).apply()
+                            }
+                        },
+                        label = { Text("Wait for idle (seconds)") },
+                        supportingText = { Text("Choose 5 to 300 seconds with no active Relay connections or traffic. New activity restarts the wait.") },
+                        isError = idleSeconds == null,
+                        singleLine = true,
+                        enabled = !state.busy && !state.recoveryRequired,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
                         value = pauseText,
                         onValueChange = { value ->
                             pauseText = value.filter(Char::isDigit).take(3)
@@ -113,7 +152,7 @@ internal fun AssistantModeCard() {
                             }
                         },
                         label = { Text("Airplane mode pause (seconds)") },
-                        supportingText = { Text("Choose 1 to 120 seconds. Your carrier may keep the same IP.") },
+                        supportingText = { Text("Time disconnected, from 1 to 120 seconds. Your carrier may keep the same IP.") },
                         isError = pauseSeconds == null,
                         singleLine = true,
                         enabled = !state.busy && !state.recoveryRequired,
@@ -121,12 +160,13 @@ internal fun AssistantModeCard() {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
-                        enabled = support.ready && pauseSeconds != null && !state.busy && !state.recoveryRequired,
+                        enabled = support.ready && pauseSeconds != null && idleSeconds != null && !state.busy && !state.recoveryRequired,
                         onClick = { confirmReconnect = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Reconnect mobile data") }
                     Text(
-                        "Use mobile data with Wi-Fi off. If relaying is enabled, also turn on Also use mobile data. " +
+                        "Keep Relay open and the phone unlocked through the wait. Its screen stays on during the cycle. " +
+                            "Use mobile data with Wi-Fi off. If relaying is enabled, also turn on Also use mobile data. " +
                             "The IP comparison uses ipify to check this phone's public IPv4 before and after reconnecting.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -176,17 +216,18 @@ internal fun AssistantModeCard() {
             title = { Text("Reconnect mobile data?") },
             text = {
                 Text(
-                    "This temporarily disconnects this phone and can interrupt checks and calls. " +
-                        "Reconnect does not wait for active checks to finish. Your carrier may keep the same IP. " +
-                        "Checks follow your PageCrawl offline policy. An interrupted check using a waiting policy " +
-                        "can remain postponed for up to 24 hours after reconnecting. Reconnect between checks. " +
-                        "If Android interrupts recovery, turn airplane mode off in Settings.",
+                    "After ${idleSeconds ?: 30} idle seconds, Relay temporarily disconnects this phone. " +
+                        "New Relay activity restarts the wait; other apps and calls are not checked. " +
+                        "Your carrier may keep the same IP. Checks follow your PageCrawl offline policy. " +
+                        "An interrupted check using a waiting policy can remain postponed for up to 24 hours after reconnecting. " +
+                        "If recovery is interrupted, turn airplane mode off in Settings.",
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirmReconnect = false
-                    pauseSeconds?.let { AssistantReconnect.start(context, it) }
+                    if (pauseSeconds != null && idleSeconds != null) AssistantReconnect.start(context, pauseSeconds, idleSeconds)
                 }) { Text("Reconnect") }
             },
             dismissButton = {
