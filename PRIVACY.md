@@ -45,6 +45,11 @@ name, model, hardware or advertising identifier, GPS location, contacts or the
 recent-destination list shown in the app. The relay's name in PageCrawl is the name
 you enter when adding it.
 
+Relay also sends connection-failure messages when it cannot reach a destination.
+These messages can include the destination host or address. PageCrawl uses the
+failure indication to handle the check and discards the detailed message rather
+than saving a diagnostic history from Relay.
+
 Before an Assistant-mode reconnect that you start or schedule, Relay asks
 PageCrawl to pause new checks briefly. It sends the relay key and requested pause
 duration. When mobile internet returns, it sends the key and pause identifier to
