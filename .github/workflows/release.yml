@@ -36,7 +36,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
           cache-dependency-path: go.sum
 
@@ -134,7 +134,7 @@ jobs:
         with:
           # Keep release builds, the Docker builder and security checks aligned.
           # go.mod declares source compatibility, not the release toolchain.
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
           cache-dependency-path: go.sum
 
@@ -266,7 +266,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
           cache-dependency-path: mobile/go.sum
 

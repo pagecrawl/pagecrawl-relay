@@ -7,7 +7,7 @@
 #   docker run -d --name pagecrawl-relay --restart unless-stopped \
 #     -e PAGECRAWL_RELAY_TOKEN=your-token pagecrawl-relay
 
-FROM golang:1.27.1-alpine3.24 AS build
+FROM golang:1.27.2-alpine3.24 AS build
 WORKDIR /src
 
 # Dependencies first, so a code edit does not re-download the module cache.

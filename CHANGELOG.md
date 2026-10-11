@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.9
+## v0.1.10
 
 - **Optional experimental Assistant mode for Android.** Select Relay as the phone's
   digital assistant to manually reconnect mobile data without root on supported devices.
@@ -13,6 +13,8 @@
   and controls to turn airplane mode off or open Android settings.
 - Restrict Android downloads to the supported 64-bit architectures and align the native
   library for devices using 16 KiB memory pages.
+- Build all release downloads and the Docker image with Go 1.27.2, which includes
+  standard-library security fixes.
 
 Reconnects can interrupt checks and calls. The control is manual, does not schedule
 reconnects and does not wait for active checks to finish. PageCrawl follows the configured

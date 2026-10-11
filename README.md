@@ -353,7 +353,7 @@ your carrier's bill: network usage includes both download and upload traffic, pl
 overhead. Check Android's usage statistics or your carrier's report. The
 [bandwidth guide](#bandwidth-depends-on-how-many-pages-you-check) applies to phones too.
 
-**Optional experimental Assistant mode (v0.1.9 or later).** You can manually reconnect
+**Optional experimental Assistant mode (v0.1.10 or later).** You can manually reconnect
 mobile data without rooting a supported phone. Ordinary relaying does not need Assistant
 mode. Selecting Relay as your digital assistant replaces your current assistant.
 
@@ -537,7 +537,7 @@ service's environment is never overridden by a stale desktop config.
 
 ## Build
 
-Run these commands from the root of this repository. Releases use Go 1.27.1.
+Run these commands from the root of this repository. Releases use Go 1.27.2.
 The settings page and its branding
 are embedded from `settings.html`; rebuild the client after editing that file.
 No separate frontend build is needed.
