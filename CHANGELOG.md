@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.12 (unreleased)
+## v0.1.12
 
 - **Optional fixed-interval reconnects on Android.** Choose an interval from 5 to
   1,440 minutes, initially 30 minutes. Scheduling is off by default; manual reconnects

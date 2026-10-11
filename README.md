@@ -363,8 +363,8 @@ overhead. Check Android's usage statistics or your carrier's report. The
 a supported phone. Ordinary relaying does not need Assistant mode. Selecting Relay as
 your digital assistant replaces your current assistant.
 
-The upcoming v0.1.12 release adds the coordinated pause and schedule described below.
-These controls require the PageCrawl reconnect update before they can run.
+Version v0.1.12 adds the coordinated pause and schedule described below.
+PageCrawl must acknowledge each reconnect pause before the phone changes its connection.
 
 In v0.1.12 or later, reconnect manually with **Reconnect mobile data**, or enable an
 optional fixed interval. Scheduling is off by default. Choose an interval from 5 to
