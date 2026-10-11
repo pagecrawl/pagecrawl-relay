@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.13
+
+- Add a privacy policy link to the Android app, available before adding a relay key
+  and while Relay is enrolled.
+- Document the data used by optional Assistant-mode reconnects and schedules,
+  including local recovery settings and public IP self-checks.
+
 ## v0.1.12
 
 - **Optional fixed-interval reconnects on Android.** Choose an interval from 5 to

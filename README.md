@@ -16,6 +16,7 @@ Your plan's normal page and check limits still apply.
 
 Open source and small enough to read: see [Why this is open source](#why-this-is-open-source).
 Security reporting is in [SECURITY.md](SECURITY.md).
+The Android app's data use is described in [PRIVACY.md](PRIVACY.md).
 See [the changelog](CHANGELOG.md) for release changes.
 
 ---

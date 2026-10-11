@@ -141,7 +141,21 @@ private fun RelayApp() {
     val vault = remember { KeyVault(context) }
     var key by remember { mutableStateOf(vault.read()) }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("PageCrawl Relay") }) }) { padding ->
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("PageCrawl Relay") },
+            actions = {
+                TextButton(onClick = {
+                    context.startActivity(Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/pagecrawl/pagecrawl-relay/blob/main/PRIVACY.md"),
+                    ))
+                }) {
+                    Text("Privacy")
+                }
+            },
+        )
+    }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
